@@ -96,4 +96,96 @@ install_docker() {
 install_nodejs
 install_docker
 
-# Part 2 follows below (user creation, Codeck download, service setup)
+# ─── Part 2: Claude CLI ─────────────────────────────────────────────
+
+# 7. Install Claude Code CLI
+if command -v claude &>/dev/null; then
+  log "Claude CLI already installed: $(claude --version 2>/dev/null || echo 'unknown version')"
+else
+  log "Installing Claude Code CLI..."
+  npm install -g @anthropic-ai/claude-code
+  log "Claude CLI installed"
+fi
+
+# ─── Part 2: User and directory setup ───────────────────────────────
+
+# 8. Create codeck system user
+if id "$CODECK_USER" &>/dev/null; then
+  log "User '$CODECK_USER' already exists"
+else
+  log "Creating user '$CODECK_USER'..."
+  useradd -r -m -s /bin/bash "$CODECK_USER"
+  log "User '$CODECK_USER' created"
+fi
+
+# Add to docker group so Claude can use Docker natively
+usermod -aG docker "$CODECK_USER"
+log "User '$CODECK_USER' added to docker group"
+
+# 9. Create workspace and config directories
+CODECK_HOME="/home/$CODECK_USER"
+DIRS=(
+  "$CODECK_HOME/workspace"
+  "$CODECK_HOME/.codeck"
+  "$CODECK_HOME/.claude"
+  "$CODECK_HOME/.ssh"
+)
+
+for dir in "${DIRS[@]}"; do
+  mkdir -p "$dir"
+done
+chown -R "$CODECK_USER:$CODECK_USER" "$CODECK_HOME"
+log "Directories created under $CODECK_HOME"
+
+# ─── Part 2: Download and install Codeck ─────────────────────────────
+
+# 10. Install Codeck application
+mkdir -p "$CODECK_DIR"
+
+if [[ "$CODECK_VERSION" == "latest" ]]; then
+  DOWNLOAD_URL="https://github.com/codeck-sh/codeck/releases/latest/download/codeck.tar.gz"
+else
+  DOWNLOAD_URL="https://github.com/codeck-sh/codeck/releases/download/v${CODECK_VERSION}/codeck.tar.gz"
+fi
+
+log "Downloading Codeck ($CODECK_VERSION)..."
+curl -fsSL "$DOWNLOAD_URL" -o /tmp/codeck.tar.gz
+tar xzf /tmp/codeck.tar.gz -C "$CODECK_DIR"
+rm -f /tmp/codeck.tar.gz
+
+cd "$CODECK_DIR"
+npm install --production
+log "Codeck installed to $CODECK_DIR"
+
+# ─── Part 2: Systemd service setup ──────────────────────────────────
+
+# 11. Install and enable systemd service
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVICE_FILE="$SCRIPT_DIR/codeck.service"
+
+if [[ -f "$SERVICE_FILE" ]]; then
+  cp "$SERVICE_FILE" /etc/systemd/system/codeck.service
+else
+  # Fallback: use the one bundled in the installed package
+  cp "$CODECK_DIR/scripts/codeck.service" /etc/systemd/system/codeck.service
+fi
+
+systemctl daemon-reload
+systemctl enable codeck
+systemctl start codeck
+log "Systemd service installed and started"
+
+# ─── Done ────────────────────────────────────────────────────────────
+
+echo ""
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}  Codeck installed successfully!${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+echo "  Access at: http://localhost"
+echo ""
+echo "  Useful commands:"
+echo "    systemctl status codeck    — check service status"
+echo "    systemctl restart codeck   — restart service"
+echo "    journalctl -u codeck -f    — follow logs"
+echo ""

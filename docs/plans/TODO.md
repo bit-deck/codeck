@@ -70,7 +70,7 @@ Progress tracker with granular tasks. Each task is scoped to ~30-60 minutes max.
 - [x] **T3.2** Create `scripts/install.sh` — Part 1: OS detection, root check, systemd check, dependency installation (Node.js 22+, Docker).
   - **Validation:** Script is executable. `bash -n scripts/install.sh` passes syntax check.
 
-- [ ] **T3.3** Create `scripts/install.sh` — Part 2: Claude CLI install, user creation, directory setup, service installation, enable + start.
+- [x] **T3.3** Create `scripts/install.sh` — Part 2: Claude CLI install, user creation, directory setup, service installation, enable + start.
   - **Validation:** Script is complete. `bash -n scripts/install.sh` passes. All steps from the spec are present.
 
 ### 3.2 Backend — Environment Detection

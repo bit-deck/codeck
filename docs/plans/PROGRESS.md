@@ -39,8 +39,10 @@
 
 - **T3.2**: Created `scripts/install.sh` Part 1 — OS detection (Linux-only), root check, systemd check, distro-aware package manager detection (apt/dnf/yum), Node.js 22+ installation with version check, Docker installation via get.docker.com.
 
+- **T3.3**: Completed `scripts/install.sh` Part 2 — Claude CLI installation (npm global), codeck user creation with docker group, workspace/config directory setup (/home/codeck/{workspace,.codeck,.claude,.ssh}), Codeck download from GitHub releases, npm production install, systemd service file copy + enable + start. Final output shows success message with useful commands.
+
 ### Next
-- **T3.3**: Complete `scripts/install.sh` Part 2 (Claude CLI install, user creation, directory setup, service installation)
+- **T3.4**: Add `detectDeploymentMode()` and `getDefaultConfig()` to `src/services/environment.ts`
 
 ### Problems Encountered
 - None
