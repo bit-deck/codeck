@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-filesystem@>=2025.7.1", "/workspace"],
+      "description": "Read and write files in the workspace"
+    }
+  }
+}

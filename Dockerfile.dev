@@ -1,0 +1,51 @@
+# Codeck - Dev Image
+#
+# Build:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Stage 1: Build (uses base image which has prebuilt node-pty)
+FROM codeck-base:latest AS builder
+WORKDIR /build
+
+# Install deps (--ignore-scripts skips native compilation, ~10s)
+COPY package.json ./
+RUN npm install --ignore-scripts
+
+# Copy prebuilt native modules from base image (compiled with build-essential already there)
+# Must remove first — cp -r into existing dir creates nested subdirectory
+RUN rm -rf ./node_modules/node-pty && cp -r /prebuilt/node_modules/node-pty ./node_modules/node-pty \
+    && rm -rf ./node_modules/better-sqlite3 && cp -r /prebuilt/node_modules/better-sqlite3 ./node_modules/better-sqlite3
+
+# Then copy source and build (only this layer rebuilds on code changes)
+COPY tsconfig.json ./
+COPY src/ ./src/
+RUN npm run build
+
+# Stage 2: Runtime
+FROM codeck-base:latest
+WORKDIR /app
+
+COPY --from=builder /build/dist ./dist
+COPY --from=builder /build/node_modules ./node_modules
+COPY --from=builder /build/package.json ./
+
+# Copy static assets (Vite already built frontend to dist/web/public)
+COPY src/templates ./dist/templates
+
+VOLUME ["/workspace", "/root/.claude"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost/api/auth/status || exit 1
+
+EXPOSE 80
+
+# NODE_ENV is NOT set globally — user dev servers need NODE_ENV=development.
+# Our process sets it inline via the entrypoint (matches production Dockerfile).
+ENV WORKSPACE=/workspace
+# Limit V8 heap to 50% of container memory (2GB of 4GB limit).
+# Ensures headroom for PTY buffers, dev servers, tmpfs, and OS overhead.
+# If you increase the container memory limit, increase this proportionally.
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+
+ENTRYPOINT ["/usr/local/bin/init-keyring.sh", "env", "NODE_ENV=production", "node", "dist/index.js"]
+CMD ["--web"]

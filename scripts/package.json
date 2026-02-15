@@ -1,0 +1,12 @@
+{
+  "name": "codeck-mdns",
+  "private": true,
+  "description": "Host-side mDNS advertiser for Codeck (Windows/macOS only)",
+  "scripts": {
+    "start": "node mdns-advertiser.cjs"
+  },
+  "dependencies": {
+    "dns-packet": "^5.6.1",
+    "multicast-dns": "^7.2.5"
+  }
+}

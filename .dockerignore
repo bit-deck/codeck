@@ -1,0 +1,14 @@
+node_modules
+sandbox-data
+.git
+README.md
+CLAUDE.md
+.env
+.env.*
+.claude
+.vscode
+.idea
+auditory
+cli/
+*.md
+!src/templates/**/*.md

@@ -1,0 +1,16 @@
+{
+  "id": "empty",
+  "name": "Empty",
+  "description": "Clean slate. No rules, no memory, no skills. You configure everything yourself.",
+  "version": "1.0.0",
+  "author": "codeck",
+  "icon": "\ud83d\udce6",
+  "tags": ["minimal"],
+  "extends": null,
+  "files": [
+    { "src": "CLAUDE.md", "dest": "/root/.claude/CLAUDE.md" }
+  ],
+  "directories": [
+    "/workspace/.codeck"
+  ]
+}

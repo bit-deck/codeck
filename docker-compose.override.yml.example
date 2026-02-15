@@ -1,0 +1,21 @@
+# Codeck — Port Override Template
+#
+# Copy to docker-compose.override.yml and add ports your dev servers need.
+# Auto-loaded by Docker Compose (no -f flag needed).
+#
+# Usage:
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   # Edit ports as needed, then:
+#   docker compose up
+#
+# Only port 80 (dashboard) is mapped by default.
+# Add the ports your project needs below.
+
+services:
+  sandbox:
+    ports:
+      - "3000:3000"
+      - "5173:5173"
+      - "8080:8080"
+    environment:
+      - CODECK_MAPPED_PORTS=80,3000,5173,8080
