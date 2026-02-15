@@ -47,8 +47,10 @@
 
 - **T3.6**: Created `docs/DEPLOYMENT.md` with full systemd deployment guide (requirements, quick install, what installer does, service management, configuration overrides, resource limits, file paths, updating, troubleshooting). Updated `docs/README.md` index and `CLAUDE.md` docs table to include the new doc.
 
+- **T3.7**: Added "Production Deployment (Linux VPS)" section to `README.md` with quick install command and service management commands. Added DEPLOYMENT.md to the Documentation links list.
+
 ### Next
-- **T3.7**: Update `README.md` with "Production Deployment" section
+- **T4.4**: Update `docs/ARCHITECTURE.md` with token refresh monitor documentation
 
 ### Problems Encountered
 - None

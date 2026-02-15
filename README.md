@@ -151,6 +151,23 @@ Only the Codeck port (default 80) is mapped initially. Additional ports can be a
 - **Workspace export** as `.tar.gz`
 - **Centralized logging** with automatic token sanitization
 
+## Production Deployment (Linux VPS)
+
+For running Codeck natively on a Linux VPS as a systemd service (e.g., for SaaS Cloud):
+
+```bash
+curl -fsSL https://codeck.app/install.sh | sudo bash
+```
+
+This installs Node.js, Docker, Claude CLI, creates a `codeck` system user, and sets up a systemd service. After installation:
+
+```bash
+systemctl status codeck       # Check service status
+journalctl -u codeck -f       # Follow logs
+```
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full guide, configuration options, and troubleshooting.
+
 ## Docker Socket Access (Experimental)
 
 By default, Codeck runs in **secure mode** without access to the host Docker daemon. Docker commands (`docker ps`, `docker compose`, etc.) will not work inside the container, and dynamic port exposure via the dashboard requires manual configuration.
@@ -194,4 +211,5 @@ Full technical documentation in [`docs/`](docs/README.md):
 - [Services](docs/SERVICES.md) — backend service layer internals
 - [Frontend](docs/FRONTEND.md) — Preact SPA, components, signals, CSS
 - [Configuration](docs/CONFIGURATION.md) — env vars, Docker, volumes, presets
+- [Deployment](docs/DEPLOYMENT.md) — systemd install, VPS setup, service management
 - [Known Issues](docs/KNOWN-ISSUES.md) — bugs, tech debt, improvements
