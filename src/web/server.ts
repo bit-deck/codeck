@@ -13,6 +13,7 @@ import { ACTIVE_AGENT } from '../services/agent.js';
 import { getGitStatus, updateClaudeMd } from '../services/git.js';
 import { destroyAllSessions, hasSavedSessions, restoreSavedSessions, saveSessionState, updateAgentBinary } from '../services/console.js';
 import { getPresetStatus } from '../services/preset.js';
+import { detectDockerSocketMount } from '../services/environment.js';
 import agentRoutes from '../routes/agent.routes.js';
 import githubRoutes from '../routes/github.routes.js';
 import gitRoutes from '../routes/git.routes.js';
@@ -250,7 +251,7 @@ export async function startWebServer(): Promise<void> {
 
   // Status + logs
   app.get('/api/status', (_req, res) => {
-    res.json({ claude: getClaudeStatus(), git: getGitStatus(), preset: getPresetStatus(), agent: { name: ACTIVE_AGENT.name, id: ACTIVE_AGENT.id } });
+    res.json({ claude: getClaudeStatus(), git: getGitStatus(), preset: getPresetStatus(), agent: { name: ACTIVE_AGENT.name, id: ACTIVE_AGENT.id }, dockerExperimental: detectDockerSocketMount() });
   });
   app.get('/api/logs', (_req, res) => {
     res.json({ logs: getLogBuffer() });
