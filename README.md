@@ -151,6 +151,20 @@ Only the Codeck port (default 80) is mapped initially. Additional ports can be a
 - **Workspace export** as `.tar.gz`
 - **Centralized logging** with automatic token sanitization
 
+## Docker Socket Access (Experimental)
+
+By default, Codeck runs in **secure mode** without access to the host Docker daemon. Docker commands (`docker ps`, `docker compose`, etc.) will not work inside the container, and dynamic port exposure via the dashboard requires manual configuration.
+
+To enable Docker access (for advanced workflows like Docker-in-Docker, dynamic port mapping, or container orchestration), use the experimental overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.experimental.yml up
+```
+
+**Warning:** This mounts `/var/run/docker.sock` into the container, granting full access to the host Docker daemon. This removes container isolation entirely. Only use on trusted systems.
+
+When experimental mode is active, the dashboard shows a persistent warning banner.
+
 ## Tech Stack
 
 | Layer | Technology |

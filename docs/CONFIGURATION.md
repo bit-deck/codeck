@@ -341,15 +341,28 @@ healthcheck:
   start_period: 10s
 ```
 
-### Docker socket
+### Docker socket (Experimental Mode)
 
-The Docker socket mount (`/var/run/docker.sock`) is required by the port-manager service for dynamic port mapping (auto-restart with new port mappings). This effectively grants the container root-equivalent access to the host Docker daemon.
+By default, the Docker socket is **NOT** mounted. The container runs in secure mode without access to the host Docker daemon. Docker commands inside the container (`docker ps`, etc.) will not work, and dynamic port exposure requires manual `docker-compose.override.yml` configuration.
+
+To enable Docker access, use the experimental compose overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.experimental.yml up
+```
+
+This mounts `/var/run/docker.sock` into the container, enabling:
+- Dynamic port mapping via the dashboard UI (auto-restart with new port mappings)
+- Docker commands inside the container (`docker ps`, `docker compose`, etc.)
+- Proactive agents can spawn sibling containers
 
 **Risk:** Any process inside the container can create new containers, mount host filesystems, or execute commands on the host. The `cap_drop`, `no-new-privileges`, and `read_only` restrictions do not apply to containers created through the socket.
 
+**Detection:** The server detects the socket mount at runtime and exposes `dockerExperimental: true` in the status API. The dashboard shows a persistent warning banner when active.
+
 **Mitigation options:**
-- **Socket proxy (recommended for security-sensitive deployments):** Use [tecnativa/docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) as a sidecar that whitelists only the Docker API endpoints needed by port-manager (container create, start, inspect).
-- **Remove the mount:** If dynamic port mapping is not needed, remove the `/var/run/docker.sock` bind mount entirely. Ports can still be mapped manually via `docker-compose.override.yml`.
+- **Default (secure):** Do not use the experimental overlay. Ports are mapped manually.
+- **Socket proxy:** Use [tecnativa/docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) as a sidecar that whitelists only needed Docker API endpoints.
 
 ### Volume data protection
 
