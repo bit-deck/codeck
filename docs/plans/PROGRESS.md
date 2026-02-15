@@ -37,8 +37,10 @@
 ### Completed
 - **T3.1**: Created `scripts/codeck.service` systemd unit file with [Unit], [Service], [Install] sections. Includes codeck user, resource limits (CPUQuota=200%, MemoryLimit=4G), NoNewPrivileges=true, and proper restart policy.
 
+- **T3.2**: Created `scripts/install.sh` Part 1 — OS detection (Linux-only), root check, systemd check, distro-aware package manager detection (apt/dnf/yum), Node.js 22+ installation with version check, Docker installation via get.docker.com.
+
 ### Next
-- **T3.2**: Create `scripts/install.sh` Part 1 (OS detection, root check, systemd check, dependency installation)
+- **T3.3**: Complete `scripts/install.sh` Part 2 (Claude CLI install, user creation, directory setup, service installation)
 
 ### Problems Encountered
 - None
