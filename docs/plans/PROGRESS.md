@@ -51,8 +51,15 @@
 
 - **T4.4**: Updated `docs/ARCHITECTURE.md` — Added `stopTokenRefreshMonitor()` to shutdown sequence. Expanded "Token Lifecycle" section with full auto-refresh monitor documentation (interval, margin, retry logic, broadcast events, lifecycle integration).
 
-### Next
-- **T-FINAL**: Final verification — build passes, all features documented, final commit
+- **T-FINAL**: All verifications passed:
+  - `npm run build` succeeds (frontend + backend)
+  - Feature 1: No `network_mode` in any compose file
+  - Feature 2: No `docker.sock` in default compose, present in experimental
+  - Feature 3: `codeck.service` + `install.sh` exist and pass syntax check, `DEPLOYMENT.md` created
+  - Feature 4: Token refresh monitor functions present in auth-anthropic.ts, documented in ARCHITECTURE.md
+
+### Status: COMPLETE
+All 22 tasks across 4 features completed.
 
 ### Problems Encountered
 - None
