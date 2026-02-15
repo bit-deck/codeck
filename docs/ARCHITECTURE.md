@@ -913,7 +913,7 @@ Browser: GET http://localhost:3000/
 
 ### Port manager (port-manager.ts)
 
-Reads `CODECK_NETWORK_MODE` and `CODECK_MAPPED_PORTS` environment variables on startup. Detects compose project info (project dir, service name, container image) via Docker container labels. Provides `isPortExposed(port)` to check if a port is in the mapped range (always true in host mode).
+Reads `CODECK_MAPPED_PORTS` environment variable on startup. Detects compose project info (project dir, service name, container image) via Docker container labels. Provides `isPortExposed(port)` to check if a port is in the mapped range.
 
 When a new port needs to be exposed in bridge mode, the port manager:
 1. Writes `docker-compose.override.yml` on the host via a helper container (base64 pipe)
@@ -988,21 +988,13 @@ Codeck implements a **single-container architecture** where all projects share o
 
 ### Network Mode Architecture
 
-**Two Deployment Modes:**
-
-1. **Bridge Mode (default)** — Standard Docker network isolation:
-   - Container runs on Docker bridge network
-   - Network namespace isolation: **ENABLED** (container isolated from host network)
-   - Port exposure: Explicit mapping via `docker-compose.yml` (e.g., `80:80`)
-   - Inbound access: Only mapped ports reachable from host
-   - Outbound access: Unrestricted (no egress filtering)
-
-2. **Host Mode (LAN access via `docker-compose.lan.yml`)** — **Removes all network isolation:**
-   - Container shares host's network namespace (`network_mode: host`)
-   - Network namespace isolation: **NONE** (container processes bind directly to host network)
-   - Port exposure: All container ports accessible on host (no mapping needed)
-   - **Security Warning:** Documented in `docker-compose.lan.yml` — "removes Docker's network isolation entirely"
-   - **Recommendation:** Only use on fully trusted, isolated networks (home/team LAN). Never on public Wi-Fi, corporate networks, or shared LANs.
+**Bridge Mode (all platforms)** — Standard Docker network isolation:
+- Container runs on Docker bridge network
+- Network namespace isolation: **ENABLED** (container isolated from host network)
+- Port exposure: Explicit mapping via `docker-compose.yml` (e.g., `80:80`)
+- Inbound access: Only mapped ports reachable from host
+- Outbound access: Unrestricted (no egress filtering)
+- LAN access: Use `docker-compose.lan.yml` overlay + host-side mDNS advertiser script
 
 ### Host Access via `extra_hosts`
 
@@ -1454,7 +1446,7 @@ Proactive agents spawn via `child_process.spawn()` with a hardcoded binary path 
 
 **Docker Socket Access — CRITICAL SECURITY NOTE**
 
-Agents have full Docker host access via the socket mount (`/var/run/docker.sock`). This is **intentional** for dev workflows (users expect `docker compose up` to work), but means:
+By default, the Docker socket is **NOT** mounted (secure mode). When running in experimental mode (`docker-compose.experimental.yml`), agents have full Docker host access via the socket mount (`/var/run/docker.sock`). This means:
 
 - Agents can spawn privileged containers to gain root on host
 - Agents can read logs and attach to other containers
