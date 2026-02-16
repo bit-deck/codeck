@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, chmodSync, statSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { ACTIVE_AGENT } from './agent.js';
-import { readCredentials } from './auth-anthropic.js';
+import { readCredentials, getCachedOAuthToken, isRealToken, getInMemoryToken } from './auth-anthropic.js';
 
 // Resolve agent binary path — re-resolves if cached path becomes invalid
 let agentBinaryPath: string = ACTIVE_AGENT.command;
@@ -48,14 +48,31 @@ export function setAgentBinaryPath(path: string): void {
 
 export function getOAuthEnv(): Record<string, string> {
   const env: Record<string, string> = { HOME: '/root' };
+
+  // Priority 0: in-memory token (authoritative — survives file deletions)
+  const memToken = getInMemoryToken();
+  if (memToken && isRealToken(memToken)) {
+    env.CLAUDE_CODE_OAUTH_TOKEN = memToken;
+    return env;
+  }
+
+  // Priority 1: plaintext cache (most reliable — never overwritten by CLI)
+  const cached = getCachedOAuthToken();
+  if (cached && isRealToken(cached)) {
+    env.CLAUDE_CODE_OAUTH_TOKEN = cached;
+    return env;
+  }
+
+  // Priority 2: credentials.json (may contain mock token from CLI)
   try {
     const creds = readCredentials();
-    if (creds?.claudeAiOauth?.accessToken) {
+    if (creds?.claudeAiOauth?.accessToken && isRealToken(creds.claudeAiOauth.accessToken)) {
       env.CLAUDE_CODE_OAUTH_TOKEN = creds.claudeAiOauth.accessToken;
     }
   } catch (e) {
     console.warn('[claude-env] Could not read OAuth credentials:', (e as Error).message);
   }
+
   return env;
 }
 

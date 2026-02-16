@@ -8,7 +8,7 @@ import {
   addLocalLog,
   type View, type Section,
 } from './state/store';
-import { apiFetch, getAuthToken } from './api';
+import { apiFetch, getAuthToken, clearAuthToken } from './api';
 import { connectWebSocket } from './ws';
 import { fitTerminal } from './terminal';
 import { LoadingView } from './components/LoadingView';
@@ -98,12 +98,12 @@ export function App() {
   // Auto-open login modal when token expires while in main view
   useEffect(() => {
     const unsub = claudeAuthenticated.subscribe(authenticated => {
-      if (!authenticated && view.value === 'main') {
+      if (!authenticated && view.value === 'main' && !loginModalOpen) {
         setLoginModalOpen(true);
       }
     });
     return unsub;
-  }, []);
+  }, [loginModalOpen]);
 
   // ========== Initialization ==========
   const initRetryCount = useRef(0);
@@ -120,6 +120,7 @@ export function App() {
     try {
       // Check password auth
       const authRes = await fetch('/api/auth/status', { signal });
+      if (!authRes.ok) throw new Error(`Auth status check failed: ${authRes.status}`);
       const authData = await authRes.json();
 
       if (authData.configured) {
@@ -143,6 +144,13 @@ export function App() {
           return; // apiFetch handles 401 redirect
         }
       } else {
+        // Server says password not configured. If we have a stale token, clear it
+        // so we don't confuse the user — they need to set up the password again.
+        const existingToken = getAuthToken();
+        if (existingToken) {
+          console.warn('[Init] Server reports unconfigured but we have a stored token — clearing stale token');
+          clearAuthToken();
+        }
         setView('auth');
         setAuthMode('setup');
         return;

@@ -1,9 +1,6 @@
-import { readFileSync, existsSync } from 'fs';
-import { ACTIVE_AGENT } from './agent.js';
-import { markTokenExpired } from './auth-anthropic.js';
+import { markTokenExpired, getCachedOAuthToken, readCredentials, isRealToken, getInMemoryToken } from './auth-anthropic.js';
 import { broadcastStatus } from '../web/websocket.js';
 
-const CREDENTIALS_PATH = ACTIVE_AGENT.credentialsFile;
 const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_TTL = 60000; // 60 seconds
 
@@ -24,21 +21,31 @@ interface ClaudeUsage {
 let usageCache: { data: ClaudeUsage; fetchedAt: number } | null = null;
 
 function getOAuthToken(): string | null {
-  // 1. Check env var
-  if (process.env.CLAUDE_CODE_OAUTH_TOKEN?.startsWith('sk-ant-oat01-')) {
+  // Priority 0: in-memory token (authoritative — survives file deletions)
+  const memToken = getInMemoryToken();
+  if (memToken && isRealToken(memToken)) {
+    return memToken;
+  }
+
+  // Priority 1: plaintext cache (most reliable — survives CLI overwrites)
+  const cached = getCachedOAuthToken();
+  if (cached && isRealToken(cached)) {
+    return cached;
+  }
+
+  // Priority 2: env var
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN && isRealToken(process.env.CLAUDE_CODE_OAUTH_TOKEN)) {
     return process.env.CLAUDE_CODE_OAUTH_TOKEN;
   }
 
-  // 2. Check credentials file
-  if (existsSync(CREDENTIALS_PATH)) {
-    try {
-      const creds = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf-8'));
-      const token = creds.claudeAiOauth?.accessToken;
-      if (token && token.startsWith('sk-ant-oat01-')) {
-        return token;
-      }
-    } catch { /* ignore */ }
-  }
+  // Priority 3: credentials file (may have mock token from CLI)
+  try {
+    const creds = readCredentials();
+    const token = creds?.claudeAiOauth?.accessToken;
+    if (token && isRealToken(token)) {
+      return token;
+    }
+  } catch { /* ignore */ }
 
   return null;
 }

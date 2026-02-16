@@ -8,6 +8,7 @@ import { getValidAgentBinary, getOAuthEnv, ensureOnboardingComplete, buildCleanE
 import { syncToClaudeSettings } from './permissions.js';
 import { sanitizeSecrets } from './session-writer.js';
 import { atomicWriteFileSync } from './memory.js';
+import { syncCredentialsAfterCLI } from './auth-anthropic.js';
 
 // ── Types ──
 
@@ -537,6 +538,9 @@ function executeAgent(agentId: string): void {
 
     // Prune old executions beyond retention limit
     pruneExecutions(execDir);
+
+    // Sync credentials after CLI execution — CLI may have refreshed/rewritten the token
+    syncCredentialsAfterCLI();
 
     // Update state
     runtime.state.lastExecutionAt = completedAt;

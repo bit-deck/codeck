@@ -46,13 +46,14 @@ export function LoginModal({ visible, onClose, onSuccess }: LoginModalProps) {
 
   useEffect(() => {
     if (visible) {
-      setLoginUrl(null);
-      setUrlReady(false);
-      setStatus('');
-      setIsError(false);
-      setSubmitting(false);
-      setDone(false);
-      startLogin();
+      // Don't reset state if we already have a URL (user is coming back from claude.ai)
+      if (!urlReady && !loginUrl) {
+        setStatus('');
+        setIsError(false);
+        setSubmitting(false);
+        setDone(false);
+        startLogin();
+      }
 
       // Focus trap and Escape handler
       const handleKeyDown = (e: KeyboardEvent) => {
@@ -201,6 +202,13 @@ export function LoginModal({ visible, onClose, onSuccess }: LoginModalProps) {
   function handleCancel() {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     apiFetch('/api/claude/login-cancel', { method: 'POST' }).catch(() => {});
+    // Reset state so next open starts fresh
+    setLoginUrl(null);
+    setUrlReady(false);
+    setStatus('');
+    setIsError(false);
+    setSubmitting(false);
+    setDone(false);
     onClose();
   }
 

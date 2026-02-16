@@ -37,15 +37,18 @@ router.post('/login', async (_req, res) => {
   });
 });
 
-// Claude login status
+// Claude login status — during an active login, only report authenticated
+// if the login flow itself completed (not from stale cache)
 router.get('/login-status', (_req, res) => {
   const loginState = getLoginState();
-  const claudeStatus = getClaudeStatus();
+  // Only check real auth if no login is in progress — prevents stale cache
+  // from auto-closing the modal before user submits the code
+  const authenticated = loginState.active ? false : getClaudeStatus().authenticated;
   res.json({
     inProgress: loginState.active,
     url: loginState.url,
     error: loginState.error,
-    authenticated: claudeStatus.authenticated,
+    authenticated,
   });
 });
 

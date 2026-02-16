@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, copyFileSync } from 'fs';
 import { scrypt, createHash, randomBytes, timingSafeEqual, ScryptOptions } from 'crypto';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { atomicWriteFileSync } from './memory.js';
 
 function scryptAsync(password: string, salt: string, keylen: number, options?: ScryptOptions): Promise<Buffer> {
@@ -16,6 +16,82 @@ function scryptAsync(password: string, salt: string, keylen: number, options?: S
 
 const CODECK_DIR = process.env.CODECK_DIR || '/workspace/.codeck';
 const AUTH_FILE = join(CODECK_DIR, 'auth.json');
+
+// Backup location on a volume that reliably persists (/root/.claude)
+const AUTH_BACKUP = '/root/.claude/codeck-auth.json';
+
+// ============ IN-MEMORY AUTH STATE ============
+// The in-memory config is the AUTHORITY while the server is running.
+// Files are only for persistence across container restarts.
+// This eliminates all issues with Docker Desktop WSL2 volume sync
+// deleting files while the server is running.
+let memoryAuthConfig: AuthConfig | null = null;
+
+/** Write auth config to memory + all file locations (best-effort) */
+function persistAuth(config: AuthConfig): void {
+  memoryAuthConfig = config;
+  const data = JSON.stringify(config, null, 2);
+
+  // Write to primary file (best-effort)
+  try {
+    if (!existsSync(CODECK_DIR)) {
+      mkdirSync(CODECK_DIR, { recursive: true, mode: 0o700 });
+    }
+    atomicWriteFileSync(AUTH_FILE, data, { mode: 0o600 });
+  } catch (e) {
+    console.warn('[Auth] Failed to write auth.json:', (e as Error).message);
+  }
+
+  // Write to backup (best-effort)
+  try {
+    const backupDir = dirname(AUTH_BACKUP);
+    if (!existsSync(backupDir)) mkdirSync(backupDir, { recursive: true });
+    atomicWriteFileSync(AUTH_BACKUP, data, { mode: 0o600 });
+  } catch (e) {
+    console.warn('[Auth] Failed to write backup:', (e as Error).message);
+  }
+}
+
+/** Load auth config from files into memory (startup only) */
+function loadAuthFromDisk(): AuthConfig | null {
+  // Try primary file
+  try {
+    if (existsSync(AUTH_FILE)) {
+      const config = JSON.parse(readFileSync(AUTH_FILE, 'utf-8')) as AuthConfig;
+      if (config.passwordHash && config.salt) {
+        console.log('[Auth] Loaded auth config from auth.json');
+        return config;
+      }
+    }
+  } catch (e) {
+    console.warn('[Auth] Error reading auth.json:', (e as Error).message);
+  }
+
+  // Try backup
+  try {
+    if (existsSync(AUTH_BACKUP)) {
+      const config = JSON.parse(readFileSync(AUTH_BACKUP, 'utf-8')) as AuthConfig;
+      if (config.passwordHash && config.salt) {
+        console.log('[Auth] Loaded auth config from backup');
+        // Restore primary file while we're at it
+        try {
+          if (!existsSync(CODECK_DIR)) mkdirSync(CODECK_DIR, { recursive: true, mode: 0o700 });
+          copyFileSync(AUTH_BACKUP, AUTH_FILE);
+        } catch { /* best-effort */ }
+        return config;
+      }
+    }
+  } catch (e) {
+    console.warn('[Auth] Error reading backup:', (e as Error).message);
+  }
+
+  return null;
+}
+
+// Load on module init — this is the ONLY time we read from disk
+memoryAuthConfig = loadAuthFromDisk();
+
+// ============ SESSIONS ============
 
 const SESSIONS_FILE = join(CODECK_DIR, 'sessions.json');
 const activeSessions = new Map<string, { createdAt: number }>();
@@ -53,6 +129,8 @@ function loadSessions(): void {
 
 // Load persisted sessions on startup
 loadSessions();
+
+// ============ AUTH CONFIG ============
 
 interface AuthConfig {
   passwordHash: string;
@@ -100,15 +178,14 @@ function hashPasswordLegacy(password: string, salt: string): string {
   return createHash('sha256').update(salt + password).digest('hex');
 }
 
+// ============ PUBLIC API ============
+
 export function isPasswordConfigured(): boolean {
-  return existsSync(AUTH_FILE);
+  // In-memory state is authoritative — no filesystem checks needed
+  return memoryAuthConfig !== null;
 }
 
 export async function setupPassword(password: string): Promise<{ success: boolean; token: string }> {
-  if (!existsSync(CODECK_DIR)) {
-    mkdirSync(CODECK_DIR, { recursive: true, mode: 0o700 });
-  }
-
   const salt = randomBytes(32).toString('hex');
   const config: AuthConfig = {
     passwordHash: await hashPassword(password, salt),
@@ -117,7 +194,7 @@ export async function setupPassword(password: string): Promise<{ success: boolea
     scryptCost: SCRYPT_COST,
   };
 
-  atomicWriteFileSync(AUTH_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
+  persistAuth(config);
 
   // Create session automatically
   const token = randomBytes(32).toString('hex');
@@ -127,10 +204,10 @@ export async function setupPassword(password: string): Promise<{ success: boolea
 }
 
 export async function validatePassword(password: string): Promise<{ success: boolean; token?: string }> {
-  if (!existsSync(AUTH_FILE)) return { success: false };
+  if (!memoryAuthConfig) return { success: false };
 
   try {
-    const config: AuthConfig = JSON.parse(readFileSync(AUTH_FILE, 'utf-8'));
+    const config = memoryAuthConfig;
 
     // Determine which algorithm was used
     const isLegacy = config.algo !== 'scrypt';
@@ -155,7 +232,7 @@ export async function validatePassword(password: string): Promise<{ success: boo
         algo: 'scrypt',
         scryptCost: SCRYPT_COST,
       };
-      atomicWriteFileSync(AUTH_FILE, JSON.stringify(upgraded, null, 2), { mode: 0o600 });
+      persistAuth(upgraded);
       const reason = isLegacy ? 'SHA-256 to scrypt' : `scrypt cost ${storedCost} to ${SCRYPT_COST}`;
       console.log(`[Auth] Migrated password hash: ${reason}`);
     }
@@ -186,7 +263,7 @@ export function invalidateSession(token: string): void {
 }
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string; token?: string }> {
-  if (!existsSync(AUTH_FILE)) return { success: false, error: 'Password not configured' };
+  if (!memoryAuthConfig) return { success: false, error: 'Password not configured' };
 
   // Verify current password (reuses validatePassword logic without creating a session)
   const verification = await validatePassword(currentPassword);
@@ -200,7 +277,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
     algo: 'scrypt',
     scryptCost: SCRYPT_COST,
   };
-  atomicWriteFileSync(AUTH_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
+  persistAuth(config);
 
   // Invalidate all existing sessions (force re-login)
   activeSessions.clear();

@@ -8,12 +8,11 @@ import v8 from 'v8';
 import { installLogInterceptor, getLogBuffer, broadcast } from './logger.js';
 import { setupWebSocket } from './websocket.js';
 import { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, changePassword } from '../services/auth.js';
-import { getClaudeStatus, isClaudeAuthenticated, getAccountInfo, startTokenRefreshMonitor, stopTokenRefreshMonitor } from '../services/auth-anthropic.js';
+import { getClaudeStatus, isClaudeAuthenticated, getAccountInfo } from '../services/auth-anthropic.js';
 import { ACTIVE_AGENT } from '../services/agent.js';
 import { getGitStatus, updateClaudeMd } from '../services/git.js';
 import { destroyAllSessions, hasSavedSessions, restoreSavedSessions, saveSessionState, updateAgentBinary } from '../services/console.js';
 import { getPresetStatus } from '../services/preset.js';
-import { detectDockerSocketMount, detectDeploymentMode } from '../services/environment.js';
 import agentRoutes from '../routes/agent.routes.js';
 import githubRoutes from '../routes/github.routes.js';
 import gitRoutes from '../routes/git.routes.js';
@@ -193,7 +192,9 @@ export async function startWebServer(): Promise<void> {
 
   // Auth Endpoints (public, before middleware)
   app.get('/api/auth/status', (_req, res) => {
-    res.json({ configured: isPasswordConfigured() });
+    const configured = isPasswordConfigured();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ configured });
   });
   app.post('/api/auth/setup', async (req, res) => {
     if (isPasswordConfigured()) { res.status(400).json({ error: 'Password already configured' }); return; }
@@ -251,7 +252,7 @@ export async function startWebServer(): Promise<void> {
 
   // Status + logs
   app.get('/api/status', (_req, res) => {
-    res.json({ claude: getClaudeStatus(), git: getGitStatus(), preset: getPresetStatus(), agent: { name: ACTIVE_AGENT.name, id: ACTIVE_AGENT.id }, dockerExperimental: detectDockerSocketMount() });
+    res.json({ claude: getClaudeStatus(), git: getGitStatus(), preset: getPresetStatus(), agent: { name: ACTIVE_AGENT.name, id: ACTIVE_AGENT.id } });
   });
   app.get('/api/logs', (_req, res) => {
     res.json({ logs: getLogBuffer() });
@@ -297,7 +298,6 @@ export async function startWebServer(): Promise<void> {
   function gracefulShutdown(signal: string): void {
     console.log(`[Server] Received signal ${signal}, shutting down...`);
     saveSessionState('shutdown');
-    stopTokenRefreshMonitor();
     shutdownProactiveAgents();
     shutdownEmbeddings();
     shutdownSearch();
@@ -319,9 +319,6 @@ export async function startWebServer(): Promise<void> {
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
   server.listen(PORT, () => {
-    const deploymentMode = detectDeploymentMode();
-    console.log(`[Startup] Starting Codeck in ${deploymentMode} mode`);
-
     const lanIP = getLanIP();
     const isLan = lanIP !== '127.0.0.1' && !lanIP.startsWith('172.');
     const portSuffix = PORT === 80 ? '' : `:${PORT}`;
@@ -350,7 +347,6 @@ export async function startWebServer(): Promise<void> {
     );
     startPortScanner();
     startMdns();
-    startTokenRefreshMonitor(broadcast);
     initProactiveAgents(broadcast);
 
     // Daily session transcript cleanup (remove >30 day old JSONL files)
