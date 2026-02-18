@@ -29,7 +29,7 @@ import { AgentsSection } from './components/AgentsSection';
 import { MobileMenu } from './components/MobileMenu';
 import { IconBridge } from './components/Icons';
 import { ReconnectOverlay } from './components/ReconnectOverlay';
-import { initRouter, sectionFromUrl, pushSection, replaceSection } from './router';
+import { initRouter, sectionFromUrl, pushSection } from './router';
 
 // ========== Error Boundary ==========
 class ErrorBoundary extends Component<{ children: any }, { hasError: boolean }> {
@@ -177,17 +177,12 @@ export function App() {
           setView('preset');
           connectWebSocket();
         } else {
+          // Set section from URL BEFORE view transition so the
+          // section→URL sync effect doesn't overwrite the pathname.
+          setActiveSection(sectionFromUrl());
           setView('main');
           connectWebSocket();
           await restoreSessions();
-          // URL takes priority; fall back to claude tab if sessions exist
-          const urlSection = sectionFromUrl();
-          if (urlSection !== 'home') {
-            setActiveSection(urlSection);
-            replaceSection(urlSection);
-          } else if (sessions.value.length > 0) {
-            setActiveSection('claude');
-          }
         }
       } else {
         setView('setup');
@@ -223,6 +218,7 @@ export function App() {
           setView('preset');
           connectWebSocket();
         } else {
+          setActiveSection(sectionFromUrl());
           setView('main');
           connectWebSocket();
           await restoreSessions();
@@ -268,6 +264,7 @@ export function App() {
       setView('preset');
       connectWebSocket();
     } else {
+      setActiveSection(sectionFromUrl());
       setView('main');
       connectWebSocket();
       await restoreSessions();
@@ -281,6 +278,7 @@ export function App() {
   // ========== Preset wizard ==========
   async function handlePresetComplete() {
     setPresetConfigured(true);
+    setActiveSection(sectionFromUrl());
     setView('main');
     await restoreSessions();
   }
