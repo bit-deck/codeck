@@ -280,6 +280,11 @@ export async function startWebServer(): Promise<void> {
     res.json({ authenticated: isClaudeAuthenticated(), account: getAccountInfo() });
   });
 
+  // SPA catch-all — serve index.html for all non-API routes (client-side routing)
+  app.get('*', (_req, res) => {
+    res.sendFile(join(__dirname, 'public', 'index.html'));
+  });
+
   // Centralized error handler — catch-all for unhandled errors in routes (CWE-209)
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     // Log full error server-side for debugging

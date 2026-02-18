@@ -1,12 +1,12 @@
-import { activeSection, wsConnected, agentName, setActiveSection, type Section } from '../state/store';
+import { activeSection, wsConnected, setActiveSection, type Section } from '../state/store';
 import { IconHome, IconFolder, IconTerminal, IconBot, IconPlug, IconSettings, IconBridge, IconChevronLeft, IconChevronRight } from './Icons';
 
 const STATIC_NAV_ITEMS: { section: Section; icon: () => preact.JSX.Element; label?: string }[] = [
   { section: 'home', icon: () => <IconHome size={18} />, label: 'Home' },
   { section: 'filesystem', icon: () => <IconFolder size={18} />, label: 'Filesystem' },
-  { section: 'claude', icon: () => <IconTerminal size={18} /> },
+  { section: 'claude', icon: () => <IconTerminal size={18} />, label: 'Terminal' },
 
-  { section: 'agents', icon: () => <IconBot size={18} />, label: 'Agents' },
+  { section: 'agents', icon: () => <IconBot size={18} />, label: 'Auto Agents' },
   { section: 'integrations', icon: () => <IconPlug size={18} />, label: 'Integrations' },
   { section: 'config', icon: () => <IconSettings size={18} />, label: 'Config' },
 ];
@@ -22,9 +22,7 @@ interface SidebarProps {
 export function Sidebar({ onSectionChange, mobileOpen, onClose, collapsed, onToggleCollapse }: SidebarProps) {
   const connected = wsConnected.value;
   const current = activeSection.value;
-  const navItems = STATIC_NAV_ITEMS.map(item =>
-    item.section === 'claude' ? { ...item, label: agentName.value } : { ...item, label: item.label! }
-  );
+  const navItems = STATIC_NAV_ITEMS;
 
   const sidebarClass = `sidebar${mobileOpen ? ' open' : ''}${collapsed ? ' collapsed' : ''}`;
 

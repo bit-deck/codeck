@@ -29,6 +29,7 @@ import { AgentsSection } from './components/AgentsSection';
 import { MobileMenu } from './components/MobileMenu';
 import { IconBridge } from './components/Icons';
 import { ReconnectOverlay } from './components/ReconnectOverlay';
+import { initRouter, sectionFromUrl, pushSection, replaceSection } from './router';
 
 // ========== Error Boundary ==========
 class ErrorBoundary extends Component<{ children: any }, { hasError: boolean }> {
@@ -94,6 +95,18 @@ export function App() {
     document.body.addEventListener('touchmove', preventPullToRefresh, { passive: false });
     return () => document.body.removeEventListener('touchmove', preventPullToRefresh);
   }, []);
+
+  // Router: init popstate listener
+  useEffect(() => {
+    initRouter();
+  }, []);
+
+  // Router: sync section signal → URL
+  useEffect(() => {
+    if (currentView === 'main') {
+      pushSection(section);
+    }
+  }, [section, currentView]);
 
   // Auto-open login modal when token expires while in main view
   useEffect(() => {
@@ -167,8 +180,12 @@ export function App() {
           setView('main');
           connectWebSocket();
           await restoreSessions();
-          // Auto-switch to Claude tab if there are active sessions
-          if (sessions.value.length > 0) {
+          // URL takes priority; fall back to claude tab if sessions exist
+          const urlSection = sectionFromUrl();
+          if (urlSection !== 'home') {
+            setActiveSection(urlSection);
+            replaceSection(urlSection);
+          } else if (sessions.value.length > 0) {
             setActiveSection('claude');
           }
         }
