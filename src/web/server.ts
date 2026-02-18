@@ -10,7 +10,7 @@ import { setupWebSocket } from './websocket.js';
 import { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, changePassword } from '../services/auth.js';
 import { getClaudeStatus, isClaudeAuthenticated, getAccountInfo, startTokenRefreshMonitor, stopTokenRefreshMonitor } from '../services/auth-anthropic.js';
 import { ACTIVE_AGENT } from '../services/agent.js';
-import { getGitStatus, updateClaudeMd } from '../services/git.js';
+import { getGitStatus, updateClaudeMd, initGitHub } from '../services/git.js';
 import { destroyAllSessions, hasSavedSessions, restoreSavedSessions, saveSessionState, updateAgentBinary } from '../services/console.js';
 import { getPresetStatus } from '../services/preset.js';
 import agentRoutes from '../routes/agent.routes.js';
@@ -23,7 +23,7 @@ import { initPortManager } from '../services/port-manager.js';
 import { startMdns, stopMdns, getLanIP } from '../services/mdns.js';
 import { ensureDirectories } from '../services/memory.js';
 import { initializeIndexer, shutdownIndexer } from '../services/memory-indexer.js';
-import { initializeSearch, shutdownSearch, search, isSearchAvailable } from '../services/memory-search.js';
+import { initializeSearch, shutdownSearch } from '../services/memory-search.js';
 import consoleRoutes from '../routes/console.routes.js';
 import presetRoutes from '../routes/preset.routes.js';
 import memoryRoutes from '../routes/memory.routes.js';
@@ -88,7 +88,7 @@ export async function startWebServer(): Promise<void> {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:"],
+        imgSrc: ["'self'", "data:", "https://avatars.githubusercontent.com"],
         connectSrc: ["'self'", "ws:", "wss:"],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
@@ -168,28 +168,6 @@ export async function startWebServer(): Promise<void> {
     failedAttempts.delete(ip);
   }
 
-  // Localhost bypass for memory search (allows Claude Code inside the container
-  // to search memory without auth — only accessible from 127.0.0.1/::1)
-  app.get('/api/memory/search', (req, res, next) => {
-    const ip = req.ip || '';
-    const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-    if (!isLocalhost) return next();
-
-    if (!isSearchAvailable()) {
-      res.json({ results: [], available: false });
-      return;
-    }
-    const q = (req.query.q as string) || '';
-    if (q.length > 1000) {
-      res.status(400).json({ error: 'Query exceeds maximum length (1000 characters)' });
-      return;
-    }
-    const scope = req.query.scope ? (req.query.scope as string).split(',') : undefined;
-    const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit as string, 10) || 20, 1), 100) : undefined;
-    const results = search({ query: q, scope, limit });
-    res.json({ results, available: true });
-  });
-
   // Auth Endpoints (public, before middleware)
   app.get('/api/auth/status', (_req, res) => {
     const configured = isPasswordConfigured();
@@ -222,6 +200,13 @@ export async function startWebServer(): Promise<void> {
   // Auth Middleware (protects all /api/* below)
   app.use('/api', (req, res, next) => {
     if (!isPasswordConfigured()) return next();
+
+    // Localhost bypass for memory API — agent inside container has full access
+    if (req.path.startsWith('/memory')) {
+      const ip = req.ip || '';
+      if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+    }
+
     // Support token via Bearer header or ?token= query param (for download links)
     const token = req.headers.authorization?.replace('Bearer ', '') || (req.query.token as string | undefined);
     if (!token || !validateSession(token)) { res.status(401).json({ error: 'Unauthorized', needsAuth: true }); return; }
@@ -336,6 +321,7 @@ export async function startWebServer(): Promise<void> {
     console.log('');
     logMemoryConfig();
     initPortManager();
+    initGitHub();
     updateClaudeMd();
     ensureDirectories();
 

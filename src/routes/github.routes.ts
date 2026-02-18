@@ -58,6 +58,9 @@ router.get('/login-status', (_req, res) => {
     success: ghLoginState.success,
     authenticated: gitStatus.github.authenticated,
     mode: gitStatus.github.mode,
+    username: gitStatus.github.username,
+    email: gitStatus.github.email,
+    avatarUrl: gitStatus.github.avatarUrl,
   });
 });
 

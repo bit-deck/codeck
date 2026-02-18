@@ -18,6 +18,9 @@ interface GitHubConfig {
   repoUrl: string | null;
   repoToken: string | null;
   authenticated: boolean;
+  username: string | null;
+  email: string | null;
+  avatarUrl: string | null;
 }
 
 interface RepoInfo {
@@ -38,6 +41,9 @@ let gitHubConfig: GitHubConfig = {
   repoUrl: null,
   repoToken: null,
   authenticated: false,
+  username: null,
+  email: null,
+  avatarUrl: null,
 };
 
 /**
@@ -70,6 +76,42 @@ export function isGhInstalled(): boolean {
 export function isGhAuthenticated(): boolean {
   const result = spawnSync('gh', ['auth', 'status'], { stdio: 'pipe', timeout: 10000 });
   return result.status === 0;
+}
+
+/**
+ * Load GitHub account info (username, email, avatar) via gh api.
+ * Called after successful login and at startup restore.
+ */
+function loadGitHubAccountInfo(): void {
+  try {
+    const result = spawnSync('gh', ['api', 'user', '--jq', '.login,.email,.avatar_url'], {
+      stdio: 'pipe',
+      timeout: 10000,
+    });
+    if (result.status === 0) {
+      const lines = result.stdout.toString().trim().split('\n');
+      gitHubConfig.username = lines[0] || null;
+      gitHubConfig.email = (lines[1] && lines[1] !== 'null') ? lines[1] : null;
+      gitHubConfig.avatarUrl = lines[2] || null;
+      console.log(`[GitHub] Account info loaded: @${gitHubConfig.username}`);
+    }
+  } catch (err) {
+    console.warn('[GitHub] Failed to load account info:', (err as Error).message);
+  }
+}
+
+/**
+ * Initialize GitHub state at server startup.
+ * If gh CLI is authenticated (token persisted via volume), restore state and load account info.
+ */
+export function initGitHub(): void {
+  if (!isGhInstalled()) return;
+  if (isGhAuthenticated()) {
+    gitHubConfig.authenticated = true;
+    gitHubConfig.mode = 'full';
+    loadGitHubAccountInfo();
+    console.log('[GitHub] Session restored from persisted token');
+  }
 }
 
 /**
@@ -208,6 +250,7 @@ export function startGitHubFullLogin(callbacks: {
     proc.on('close', (code) => {
       if (code === 0) {
         gitHubConfig.authenticated = true;
+        loadGitHubAccountInfo();
         console.log('\n✓ GitHub authenticated successfully\n');
         if (callbacks.onSuccess) callbacks.onSuccess();
         resolve(true);
@@ -674,6 +717,9 @@ export function getGitStatus() {
       mode: gitHubConfig.mode || (ghAuth ? 'full' : null),
       repoUrl: gitHubConfig.repoUrl,
       authenticated: gitHubConfig.authenticated || ghAuth,
+      username: gitHubConfig.username,
+      email: gitHubConfig.email,
+      avatarUrl: gitHubConfig.avatarUrl,
     },
     ssh: {
       hasKey: hasSSHKey(),
