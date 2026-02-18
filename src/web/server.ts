@@ -69,6 +69,28 @@ export async function startWebServer(): Promise<void> {
   const app = express();
   const server = createServer(app);
 
+  // Security headers FIRST — must apply to ALL responses (static + dynamic)
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        imgSrc: ["'self'", "data:", "https://avatars.githubusercontent.com"],
+        connectSrc: ["'self'", "ws:", "wss:"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    // Disable HSTS — Codeck runs over plain HTTP in a local/LAN environment
+    strictTransportSecurity: false,
+    // Disable COEP — Google Fonts and other CDN resources don't set CORP headers
+    crossOriginEmbedderPolicy: false,
+  }));
+
+  app.use(express.json());
+
   // Hashed assets (JS/CSS) get long cache; index.html always revalidates
   app.use(express.static(join(__dirname, 'public'), {
     setHeaders(res, filePath) {
@@ -78,25 +100,6 @@ export async function startWebServer(): Promise<void> {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       }
     },
-  }));
-  app.use(express.json());
-
-  // Security headers (Helmet.js)
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "https://avatars.githubusercontent.com"],
-        connectSrc: ["'self'", "ws:", "wss:"],
-        fontSrc: ["'self'"],
-        objectSrc: ["'none'"],
-        frameAncestors: ["'none'"],
-      },
-    },
-    // Disable HSTS — Codeck runs over plain HTTP in a local/LAN environment
-    strictTransportSecurity: false,
   }));
 
   // Rate Limiting (in-memory, per-route groups with stale IP cleanup)
