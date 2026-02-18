@@ -26,6 +26,7 @@ interface ConsoleSession {
   outputBuffer: string[];
   outputBufferSize: number;
   attached: boolean;
+  conversationId?: string;
 }
 
 const sessions = new Map<string, ConsoleSession>();
@@ -39,6 +40,52 @@ interface CreateSessionOptions {
   cwd?: string;
   resume?: boolean;
   continuationPrompt?: string;
+  conversationId?: string;
+}
+
+/**
+ * Detect the conversation ID for a new Claude session by polling for a new .jsonl file.
+ * Runs async (fire-and-forget) — does not block session creation.
+ */
+function detectConversationId(session: ConsoleSession): void {
+  const encoded = encodeProjectPath(session.cwd);
+  const projectDir = `${ACTIVE_AGENT.projectsDir}/${encoded}`;
+
+  // Snapshot existing .jsonl files before Claude creates a new one
+  const existingFiles = new Set<string>();
+  try {
+    if (existsSync(projectDir)) {
+      for (const f of readdirSync(projectDir)) {
+        if (f.endsWith('.jsonl')) existingFiles.add(f);
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Poll for new file (500ms intervals, up to 15s)
+  let attempts = 0;
+  const maxAttempts = 30;
+  const interval = setInterval(() => {
+    attempts++;
+    try {
+      if (!existsSync(projectDir)) {
+        if (attempts >= maxAttempts) clearInterval(interval);
+        return;
+      }
+      const files = readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+      const newFile = files.find(f => !existingFiles.has(f));
+      if (newFile) {
+        session.conversationId = newFile.replace('.jsonl', '');
+        saveSessionState('conversation_detected');
+        console.log(`[Console] Detected conversation: ${session.conversationId}`);
+        clearInterval(interval);
+      } else if (attempts >= maxAttempts) {
+        console.warn(`[Console] Could not detect conversation ID for session ${session.id}`);
+        clearInterval(interval);
+      }
+    } catch {
+      clearInterval(interval);
+    }
+  }, 500);
 }
 
 export function createConsoleSession(options?: string | CreateSessionOptions): ConsoleSession {
@@ -62,8 +109,11 @@ export function createConsoleSession(options?: string | CreateSessionOptions): C
   // Build CLI args from launch options
   const args: string[] = [];
   if (opts.resume) {
-    if (opts.continuationPrompt) {
-      // Auto-restore: use --continue (resumes most recent, no picker) with prompt as -p arg
+    if (opts.conversationId) {
+      // Auto-restore: resume specific conversation (no picker, no prompt needed)
+      args.push(ACTIVE_AGENT.flags.resume, opts.conversationId);
+    } else if (opts.continuationPrompt) {
+      // Legacy: --continue with prompt (resumes most recent)
       args.push(ACTIVE_AGENT.flags.continue, '-p', opts.continuationPrompt);
     } else {
       // User-initiated: use --resume (shows interactive picker)
@@ -98,6 +148,13 @@ export function createConsoleSession(options?: string | CreateSessionOptions): C
 
   const name = workDir.split('/').pop() || workDir;
   const session: ConsoleSession = { id, type: 'agent', pty, cwd: workDir, name, createdAt: Date.now(), outputBuffer: [], outputBufferSize: 0, attached: false };
+
+  // Set or detect conversation ID for agent sessions
+  if (opts.conversationId) {
+    session.conversationId = opts.conversationId;
+  } else if (!opts.resume) {
+    detectConversationId(session);
+  }
 
   // Start session capture for transcript logging
   startSessionCapture(id, workDir);
@@ -281,6 +338,7 @@ interface SavedSession {
   cwd: string;
   name: string;
   reason: string;
+  conversationId?: string;
   continuationPrompt?: string;
 }
 
@@ -299,6 +357,7 @@ export function saveSessionState(reason: string, continuationPrompt?: string): S
       cwd: session.cwd,
       name: session.name,
       reason,
+      conversationId: session.type === 'agent' ? session.conversationId : undefined,
       continuationPrompt: session.type === 'agent' ? continuationPrompt : undefined,
     });
   }
@@ -343,6 +402,7 @@ export function restoreSavedSessions(): Array<{ id: string; type: string; cwd: s
         const session = createConsoleSession({
           cwd,
           resume: true,
+          conversationId: saved.conversationId,
           continuationPrompt: saved.continuationPrompt,
         });
         restored.push({ id: session.id, type: session.type, cwd: session.cwd, name: session.name });
