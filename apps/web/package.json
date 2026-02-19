@@ -1,0 +1,9 @@
+{
+  "name": "@codeck/web",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "echo 'web: placeholder — will be populated in milestone 1'",
+    "clean": "rm -rf dist"
+  }
+}

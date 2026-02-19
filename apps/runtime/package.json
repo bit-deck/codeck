@@ -1,0 +1,10 @@
+{
+  "name": "@codeck/runtime",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'runtime: placeholder — will be populated in milestone 2'",
+    "clean": "rm -rf dist"
+  }
+}

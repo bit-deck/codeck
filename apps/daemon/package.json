@@ -1,0 +1,10 @@
+{
+  "name": "@codeck/daemon",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'daemon: placeholder — will be populated in milestone 3'",
+    "clean": "rm -rf dist"
+  }
+}

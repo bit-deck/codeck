@@ -1,0 +1,10 @@
+{
+  "name": "@codeck/cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'cli: placeholder — will be populated in milestone 5'",
+    "clean": "rm -rf dist"
+  }
+}

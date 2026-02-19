@@ -63,21 +63,21 @@ scripts/
 ---
 
 # CURRENT NEXT BLOCK
-(El agente debe actualizar esta sección al comenzar cada bloque)
 
-- [ ] Ninguno asignado
+- [x] MILESTONE 0 — PREPARACIÓN (completado)
+- [ ] MILESTONE 1 — WEBAPP (siguiente)
 
 ---
 
 # MILESTONE 0 — PREPARACIÓN
 
-- [ ] Crear rama refactor/daemon-runtime-gateway
-- [ ] Crear estructura monorepo (apps/, packages/)
-- [ ] Agregar turbo.json
-- [ ] Configurar workspaces
-- [ ] Crear packages/shared
-- [ ] Crear packages/protocols
-- [ ] Crear REFRACTOR_LOG.md
+- [x] Crear rama refactor/daemon-runtime-gateway
+- [x] Crear estructura monorepo (apps/, packages/)
+- [x] Agregar turbo.json
+- [x] Configurar workspaces
+- [x] Crear packages/shared
+- [x] Crear packages/protocols
+- [x] Crear REFRACTOR_LOG.md
 
 DONE cuando:
 - El repo compila como monorepo vacío.

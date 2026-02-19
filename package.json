@@ -4,6 +4,10 @@
   "description": "Docker sandbox for working with Claude CLI",
   "type": "module",
   "main": "dist/index.js",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "build:frontend": "cd src/web && npx vite build",
     "build:backend": "tsc && npm run copy:templates",
