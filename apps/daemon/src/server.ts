@@ -10,9 +10,12 @@ import {
   touchSession,
   invalidateSession,
   getActiveSessions,
+  getSessionByToken,
+  getSessionById,
   revokeSessionById,
   getAuthLog,
 } from './services/auth.js';
+import { audit, flushAudit } from './services/audit.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.CODECK_DAEMON_PORT || '8080', 10);
@@ -138,8 +141,10 @@ export async function startDaemon(): Promise<void> {
     const result = await validatePassword(password, ip, deviceId || 'unknown');
     if (result.success) {
       clearFailedAttempts(ip);
+      audit('auth.login', ip, { sessionId: result.sessionId, deviceId: result.deviceId });
       res.json({ success: true, token: result.token });
     } else {
+      audit('auth.login_failure', ip, { deviceId: deviceId || null });
       recordFailedLogin(ip);
       res.status(401).json({ success: false, error: 'Incorrect password' });
     }
@@ -166,7 +171,14 @@ export async function startDaemon(): Promise<void> {
   // Logout
   app.post('/api/auth/logout', (req, res) => {
     const token = req.headers.authorization?.replace('Bearer ', '');
-    if (token) invalidateSession(token);
+    if (token) {
+      const session = getSessionByToken(token);
+      audit('auth.logout', req.ip || 'unknown', {
+        sessionId: session?.id,
+        deviceId: session?.deviceId,
+      });
+      invalidateSession(token);
+    }
     res.json({ success: true });
   });
 
@@ -178,11 +190,22 @@ export async function startDaemon(): Promise<void> {
 
   // Revoke a session by ID
   app.delete('/api/auth/sessions/:id', (req, res) => {
+    const targetSession = getSessionById(req.params.id);
     const revoked = revokeSessionById(req.params.id);
     if (!revoked) {
       res.status(404).json({ error: 'Session not found' });
       return;
     }
+    const currentToken = req.headers.authorization?.replace('Bearer ', '');
+    const currentSession = currentToken ? getSessionByToken(currentToken) : undefined;
+    audit('auth.session_revoked', req.ip || 'unknown', {
+      sessionId: currentSession?.id,
+      deviceId: currentSession?.deviceId,
+      metadata: {
+        revokedSessionId: targetSession?.id,
+        revokedDeviceId: targetSession?.deviceId,
+      },
+    });
     res.json({ success: true });
   });
 
@@ -221,6 +244,7 @@ export async function startDaemon(): Promise<void> {
   function gracefulShutdown(signal: string): void {
     console.log(`[Daemon] Received ${signal}, shutting down...`);
     clearInterval(rateCleanupInterval);
+    flushAudit();
     server.close(() => {
       console.log('[Daemon] Closed cleanly');
       process.exit(0);

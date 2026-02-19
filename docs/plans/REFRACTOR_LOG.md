@@ -8,7 +8,7 @@ Este archivo registra el progreso y decisiones técnicas.
 
 Branch: refactor/daemon-runtime-gateway
 Modo objetivo: local + gateway
-Último bloque completado: MILESTONE 3.2 — Auth + Sesiones
+Último bloque completado: MILESTONE 3.3 — Auditoría
 
 ---
 
@@ -295,6 +295,44 @@ Modo objetivo: local + gateway
 - No se implementa `POST /api/auth/setup` en el daemon — la configuración inicial de password se hace via runtime en modo local, antes de exponer el daemon como gateway
 
 **Smoke test:** `npm run build` — OK (frontend + runtime). `npm run build:daemon` — OK. Startup en port 9997: `/api/auth/status` → `{"configured":true}`, `/api/auth/login` → rechaza password incorrecto (401), `/api/auth/sessions` → protegido (401 sin auth), `/api/auth/log` → protegido (401 sin auth), `/api/ui/status` → público, SPA catch-all → HTTP 200. Shutdown limpio.
+
+---
+
+### Iteración 10 — MILESTONE 3.3: AUDITORÍA
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 3.3 — Auditoría (audit.log JSONL, eventos auth)
+
+**Cambios:**
+- Creado `apps/daemon/src/services/audit.ts` — servicio de auditoría append-only JSONL:
+  - `audit(event, actor, opts?)` — API principal, acepta event type, IP, y opciones (sessionId, deviceId, metadata)
+  - Formato JSONL: cada línea es un JSON con `timestamp` (ISO 8601), `event`, `sessionId`, `deviceId`, `actor`, `metadata`
+  - Escritura buffered: acumula hasta 20 entries o 5 segundos antes de hacer append al archivo
+  - `flushAudit()` para vaciar el buffer en shutdown
+  - Archivo: `CODECK_DIR/audit.log` con permisos 0o600
+- Actualizado `apps/daemon/src/services/auth.ts`:
+  - `validatePassword()` ahora retorna `sessionId` y `deviceId` en el resultado de login exitoso
+  - Nuevas funciones `getSessionByToken(token)` y `getSessionById(sessionId)` para lookup de sesiones (necesarias para audit en logout/revoke)
+- Actualizado `apps/daemon/src/server.ts`:
+  - Import de `audit` y `flushAudit`
+  - Import de `getSessionByToken` y `getSessionById`
+  - `auth.login` emitido en login exitoso (con sessionId, deviceId)
+  - `auth.login_failure` emitido en login fallido (con deviceId del intento)
+  - `auth.logout` emitido en logout (con sessionId y deviceId de la sesión terminada)
+  - `auth.session_revoked` emitido en revoke (con sessionId del actor y metadata del revoked)
+  - `flushAudit()` llamado en graceful shutdown
+
+**Problemas:** Ninguno.
+
+**Decisiones:**
+- El audit log es append-only JSONL — no se usa rotation ni truncation por ahora (la rotation se puede agregar después con logrotate o un mecanismo interno si el archivo crece mucho)
+- La escritura es buffered (5s / 20 entries) para evitar I/O sincrónico en cada request — el buffer se vacía en shutdown con `flushAudit()`
+- Los event types definidos para auth: `auth.login`, `auth.login_failure`, `auth.logout`, `auth.session_revoked` — los tipos para pty/files/proactive se agregarán cuando el proxy (milestone 3.5/3.6) permita interceptar esas operaciones
+- El campo `actor` es siempre la IP del request — no hay concepto de "username" en Codeck (single-user system)
+- `metadata` es opcional y se usa para información adicional (e.g., en `session_revoked` incluye el ID de la sesión revocada)
+- `sessionId` es null en `auth.login_failure` porque no hay sesión asociada a un intento fallido
+
+**Smoke test:** `npm run build` — OK (frontend + runtime). `npm run build:daemon` — OK. Startup en port 9997: `/api/auth/status` → `{"configured":true}`, login fallido genera audit entry, shutdown genera flush a `audit.log`. Verificado contenido JSONL: `{"timestamp":"...","event":"auth.login_failure","sessionId":null,"deviceId":"test-device-1","actor":"::1"}`. Shutdown limpio.
 
 ---
 

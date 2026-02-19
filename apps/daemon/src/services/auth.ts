@@ -169,7 +169,7 @@ export async function validatePassword(
   password: string,
   ip: string,
   deviceId: string,
-): Promise<{ success: boolean; token?: string }> {
+): Promise<{ success: boolean; token?: string; sessionId?: string; deviceId?: string }> {
   const config = loadAuthConfig();
   if (!config) return { success: false };
 
@@ -193,7 +193,7 @@ export async function validatePassword(
     sessionById.set(sessionData.id, token);
     saveSessions();
     logAuthEvent('login_success', ip);
-    return { success: true, token };
+    return { success: true, token, sessionId: sessionData.id, deviceId: sessionData.deviceId };
   } catch {
     return { success: false };
   }
@@ -270,6 +270,16 @@ export function revokeSessionById(sessionId: string): boolean {
   if (!token) return false;
   invalidateSession(token);
   return true;
+}
+
+export function getSessionByToken(token: string): SessionData | undefined {
+  return activeSessions.get(token);
+}
+
+export function getSessionById(sessionId: string): SessionData | undefined {
+  const token = sessionById.get(sessionId);
+  if (!token) return undefined;
+  return activeSessions.get(token);
 }
 
 export function getAuthLog(): AuthLogEntry[] {

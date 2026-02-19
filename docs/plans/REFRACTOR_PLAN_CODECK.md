@@ -67,7 +67,7 @@ scripts/
 - [x] MILESTONE 0 — PREPARACIÓN (completado)
 - [x] MILESTONE 1 — WEBAPP (completado)
 - [x] MILESTONE 2 — RUNTIME (completado)
-- [ ] MILESTONE 3 — DAEMON (siguiente: 3.3)
+- [ ] MILESTONE 3 — DAEMON (siguiente: 3.4)
 
 ---
 
@@ -141,8 +141,8 @@ DONE cuando:
 - [x] lastSeen update
 
 ## 3.3 Auditoría
-- [ ] audit.log JSONL
-- [ ] eventos auth
+- [x] audit.log JSONL
+- [x] eventos auth
 
 ## 3.4 Rate limit
 - [ ] auth agresivo
