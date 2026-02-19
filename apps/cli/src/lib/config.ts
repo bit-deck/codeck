@@ -20,7 +20,7 @@ const schema = {
   port: { type: 'number' as const, default: 80 },
   extraPorts: { type: 'array' as const, default: [] as number[], items: { type: 'number' as const } },
   lanMode: { type: 'string' as const, default: 'none', enum: ['none', 'host', 'mdns'] },
-  mode: { type: 'string' as const, default: 'isolated', enum: ['isolated', 'managed'] },
+  mode: { type: 'string' as const, default: 'isolated', enum: ['isolated', 'managed', 'local', 'gateway'] },
   initialized: { type: 'boolean' as const, default: false },
   os: { type: 'string' as const, default: 'linux', enum: ['windows', 'macos', 'linux'] },
   lanPid: { type: 'number' as const },
@@ -29,15 +29,13 @@ const schema = {
 const config = new Conf<CodeckConfig>({
   projectName: 'codeck',
   schema,
-  migrations: {
-    // Migrate old mode names to new ones
-    '>=0.0.1': (store: Conf<CodeckConfig>) => {
-      const mode = store.get('mode') as string;
-      if (mode === 'local') store.set('mode', 'isolated');
-      if (mode === 'gateway') store.set('mode', 'managed');
-    },
-  },
 });
+
+// Migrate old mode names (local→isolated, gateway→managed) on load
+const rawMode = config.get('mode') as string;
+if (rawMode === 'local' || rawMode === 'gateway') {
+  config.set('mode', rawMode === 'local' ? 'isolated' : 'managed');
+}
 
 export function getConfig(): CodeckConfig {
   return {
