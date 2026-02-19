@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile } from '../state/store';
+import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile, restoringPending } from '../state/store';
 import { apiFetch } from '../api';
 import { createTerminal, destroyTerminal, fitTerminal, focusTerminal, writeToTerminal } from '../terminal';
 import { wsSend, setTerminalHandlers, attachSession } from '../ws';
@@ -198,7 +198,7 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
           ref={instancesRef}
           onClick={handleTerminalTap}
         >
-          {sessionList.length === 0 && (
+          {sessionList.length === 0 && !restoringPending.value && (
             <div class="claude-empty">
               <div class="claude-empty-icon"><IconTerminal size={48} /></div>
               <div class="claude-empty-title">{agentName.value} CLI Console</div>
@@ -209,6 +209,12 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
             <div class="terminal-loading-overlay">
               <div class="spinner" />
               <div class="terminal-loading-text">Starting session...</div>
+            </div>
+          )}
+          {restoringPending.value && (
+            <div class="terminal-loading-overlay">
+              <div class="spinner" />
+              <div class="terminal-loading-text">Restoring sessions...</div>
             </div>
           )}
         </div>

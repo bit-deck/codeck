@@ -1,5 +1,5 @@
 import { activeSection, wsConnected, setActiveSection, type Section } from '../state/store';
-import { IconHome, IconFolder, IconTerminal, IconBot, IconPlug, IconSettings, IconShield } from './Icons';
+import { IconHome, IconFolder, IconTerminal, IconBot, IconPlug, IconSettings, IconShield, IconBrain } from './Icons';
 import { NAV_ITEMS } from './nav-items';
 
 const SECTION_ICONS: Record<Section, () => preact.JSX.Element> = {
@@ -8,8 +8,8 @@ const SECTION_ICONS: Record<Section, () => preact.JSX.Element> = {
   claude: () => <IconTerminal size={22} />,
   agents: () => <IconBot size={22} />,
   integrations: () => <IconPlug size={22} />,
-  config: () => <IconSettings size={22} />,
-  settings: () => <IconShield size={22} />,
+  config: () => <IconBrain size={22} />,
+  settings: () => <IconSettings size={22} />,
 };
 
 interface MobileMenuProps {

@@ -25,7 +25,7 @@ let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let staleCheckTimer: ReturnType<typeof setInterval> | null = null;
 let lastMessageAt = 0;
-let reconnectBackoff = 1000; // Exponential backoff: 1s → 2s → 4s → ... → 30s cap
+let reconnectBackoff = 500; // Exponential backoff: 0.5s → 1s → 2s → ... → 15s cap
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 15;
 
@@ -76,7 +76,7 @@ export function connectWebSocket(): void {
   ws.onopen = () => {
     setWsConnected(true);
     lastMessageAt = Date.now();
-    reconnectBackoff = 1000; // Reset backoff on successful connection
+    reconnectBackoff = 500; // Reset backoff on successful connection
     reconnectAttempts = 0;
     attachedSessions.clear(); // New connection — reset attach tracking
     addLog({ type: 'info', message: 'Connected to server', timestamp: Date.now() });
@@ -183,20 +183,27 @@ export function connectWebSocket(): void {
 
   ws.onclose = () => {
     setWsConnected(false);
-    setRestoringPending(false);
+    // If sessions were active, assume they'll need to be restored on reconnect.
+    // Set restoringPending immediately so the overlay shows "Restoring sessions..."
+    // as soon as the WS comes back — eliminating the gap between reconnection
+    // and the server's pendingRestore status message arriving.
+    if (sessions.value.length > 0) {
+      setRestoringPending(true);
+    }
     ws = null;
     if (staleCheckTimer) { clearInterval(staleCheckTimer); staleCheckTimer = null; }
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       addLog({ type: 'error', message: 'Unable to reach server after multiple attempts', timestamp: Date.now() });
+      setRestoringPending(false);
       return; // Stop retrying — user can reload or the overlay shows failure
     }
-    reconnectAttempts++;
 
-    // Jitter: use 50-100% of backoff to spread out reconnection attempts
-    const delay = reconnectBackoff * (0.5 + Math.random() * 0.5);
+    // First attempt: near-instant (50ms). Subsequent attempts: exponential backoff.
+    const delay = reconnectAttempts === 0 ? 50 : reconnectBackoff * (0.5 + Math.random() * 0.5);
+    reconnectAttempts++;
     reconnectTimer = setTimeout(connectWebSocket, delay);
-    reconnectBackoff = Math.min(reconnectBackoff * 2, 30000);
+    reconnectBackoff = Math.min(reconnectBackoff * 2, 15000);
   };
 
   ws.onerror = () => ws?.close();

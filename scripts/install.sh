@@ -184,6 +184,15 @@ SUDOERS
 chmod 440 "$SUDOERS_FILE"
 log "Sudoers configured (self-deploy permissions)"
 
+# ─── Git identity ───────────────────────────────────────────────────
+
+step "Git identity"
+
+# Set git committer name for the codeck user (displayed on GitHub commits).
+# The email should be configured after gh auth login to link commits to a GitHub avatar.
+sudo -u "$CODECK_USER" git config --global user.name "Codeck"
+log "Git user.name = Codeck (set for $CODECK_USER)"
+
 # ─── Clone and build Codeck ─────────────────────────────────────────
 
 step "Codeck (clone + build)"
