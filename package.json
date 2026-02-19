@@ -12,7 +12,7 @@
     "build:frontend": "npm run build -w @codeck/web",
     "build:backend": "npm run build -w @codeck/runtime",
     "build:daemon": "npm run build -w @codeck/daemon",
-    "build": "npm run build:frontend && npm run build:backend",
+    "build": "npm run build:frontend && npm run build:backend && npm run build:daemon",
     "start": "node apps/runtime/dist/index.js",
     "start:web": "node apps/runtime/dist/index.js --web",
     "dev": "npm run dev -w @codeck/runtime",

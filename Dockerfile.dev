@@ -19,6 +19,7 @@ RUN rm -rf ./node_modules/node-pty && cp -r /prebuilt/node_modules/node-pty ./no
 # Then copy source and build (only this layer rebuilds on code changes)
 COPY tsconfig.json ./
 COPY apps/runtime/ ./apps/runtime/
+COPY apps/daemon/ ./apps/daemon/
 COPY apps/web/ ./apps/web/
 RUN npm run build
 
@@ -27,6 +28,7 @@ FROM codeck-base:latest
 WORKDIR /app
 
 COPY --from=builder /build/apps/runtime/dist ./apps/runtime/dist
+COPY --from=builder /build/apps/daemon/dist ./apps/daemon/dist
 COPY --from=builder /build/apps/web/dist ./apps/web/dist
 COPY --from=builder /build/node_modules ./node_modules
 COPY --from=builder /build/package.json ./

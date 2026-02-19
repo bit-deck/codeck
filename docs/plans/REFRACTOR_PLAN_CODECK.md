@@ -68,6 +68,7 @@ scripts/
 - [x] MILESTONE 1 — WEBAPP (completado)
 - [x] MILESTONE 2 — RUNTIME (completado)
 - [x] MILESTONE 3 — DAEMON (completado)
+- [x] MILESTONE 4 — NETWORKING (completado)
 
 ---
 
@@ -164,10 +165,10 @@ DONE cuando:
 
 # MILESTONE 4 — NETWORKING
 
-- [ ] Crear docker network codeck_net
-- [ ] runtime container name codeck-runtime
-- [ ] runtime puertos 7777/7778 internos
-- [ ] daemon conecta por nombre contenedor
+- [x] Crear docker network codeck_net
+- [x] runtime container name codeck-runtime
+- [x] runtime puertos 7777/7778 internos
+- [x] daemon conecta por nombre contenedor
 
 DONE cuando:
 - nginx → daemon → runtime funciona.

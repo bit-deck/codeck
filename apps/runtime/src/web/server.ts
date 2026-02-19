@@ -41,6 +41,8 @@ import { cleanupOldSessions } from '../services/session-summarizer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.CODECK_PORT || '80', 10);
+// Optional separate port for WebSocket connections (used in gateway mode: runtime WS on 7778)
+const WS_PORT = parseInt(process.env.CODECK_WS_PORT || '0', 10) || 0;
 // Resolve path to apps/web/dist from apps/runtime/dist/web/
 const WEB_DIST = join(__dirname, '../../../web/dist');
 
@@ -312,7 +314,17 @@ export async function startWebServer(): Promise<void> {
   setupWebSocket();
   setupInternalPty();
 
-  server.on('upgrade', (req, socket, head) => {
+  // Optional separate WS server (gateway mode: WS on dedicated port)
+  let wsServer: ReturnType<typeof createServer> | null = null;
+  const upgradeTarget = (WS_PORT && WS_PORT !== PORT) ? (() => {
+    wsServer = createServer((_req, res) => {
+      res.writeHead(426, { 'Content-Type': 'text/plain' });
+      res.end('WebSocket upgrade required');
+    });
+    return wsServer;
+  })() : server;
+
+  upgradeTarget.on('upgrade', (req, socket, head) => {
     const pathname = (req.url || '').split('?')[0];
     if (pathname.startsWith('/internal/pty/')) {
       handlePtyUpgrade(req, socket as import('net').Socket, head);
@@ -333,6 +345,7 @@ export async function startWebServer(): Promise<void> {
     stopMdns();
     stopPortScanner();
     destroyAllSessions();
+    if (wsServer) wsServer.close();
     server.close(() => {
       console.log('[Server] Closed cleanly');
       process.exit(0);
@@ -352,6 +365,9 @@ export async function startWebServer(): Promise<void> {
     const portSuffix = PORT === 80 ? '' : `:${PORT}`;
     console.log(`\n🐳 Codeck running`);
     console.log(`   Local: http://localhost${portSuffix}`);
+    if (wsServer && WS_PORT) {
+      console.log(`   WS:    :${WS_PORT}`);
+    }
     if (isLan) {
       console.log(`   LAN:   http://codeck.local${portSuffix}  (${lanIP})`);
     }
@@ -397,4 +413,11 @@ export async function startWebServer(): Promise<void> {
       }, restoreDelayMs);
     }
   });
+
+  // Start separate WS server if configured (gateway mode)
+  if (wsServer && WS_PORT) {
+    wsServer.listen(WS_PORT, () => {
+      console.log(`[Server] WebSocket server listening on :${WS_PORT}`);
+    });
+  }
 }

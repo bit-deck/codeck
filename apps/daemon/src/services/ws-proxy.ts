@@ -5,6 +5,8 @@ import { isPasswordConfigured, validateSession, touchSession } from './auth.js';
 // ── Config ──
 
 const RUNTIME_URL = process.env.CODECK_RUNTIME_URL || 'http://codeck-runtime:7777';
+// Separate WS URL for the runtime's WebSocket port (defaults to HTTP URL if not set)
+const RUNTIME_WS_URL = process.env.CODECK_RUNTIME_WS_URL || RUNTIME_URL;
 const MAX_WS_CONNECTIONS = parseInt(process.env.MAX_WS_CONNECTIONS || '20', 10);
 const WS_PING_INTERVAL_MS = parseInt(process.env.WS_PING_INTERVAL_MS || '30000', 10);
 
@@ -105,13 +107,13 @@ export function handleWsUpgrade(
     return;
   }
 
-  // Build the target URL for the runtime
+  // Build the target URL for the runtime WS port
   // Forward the path as-is (e.g., /ws, /internal/pty/:id)
-  const targetUrl = new URL(url.pathname + url.search, RUNTIME_URL);
+  const targetUrl = new URL(url.pathname + url.search, RUNTIME_WS_URL);
   // Remove daemon token from the proxied request
   targetUrl.searchParams.delete('token');
 
-  const parsed = new URL(RUNTIME_URL);
+  const parsed = new URL(RUNTIME_WS_URL);
 
   // Make an HTTP upgrade request to the runtime
   const proxyReq = httpRequest({
@@ -232,4 +234,9 @@ export function shutdownWsProxy(): void {
 /** Current active WS connection count. */
 export function getWsConnectionCount(): number {
   return connections.size;
+}
+
+/** Runtime WS URL for logging. */
+export function getRuntimeWsUrl(): string {
+  return RUNTIME_WS_URL;
 }

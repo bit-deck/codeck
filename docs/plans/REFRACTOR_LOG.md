@@ -8,7 +8,7 @@ Este archivo registra el progreso y decisiones técnicas.
 
 Branch: refactor/daemon-runtime-gateway
 Modo objetivo: local + gateway
-Último bloque completado: MILESTONE 3.6 — Proxy WS (MILESTONE 3 COMPLETO)
+Último bloque completado: MILESTONE 4 — NETWORKING
 
 ---
 
@@ -403,6 +403,48 @@ Modo objetivo: local + gateway
 - SPA catch-all → HTTP 200
 - Startup log: `[Daemon] Proxying API to http://localhost:9996`
 - Shutdown limpio.
+
+---
+
+### Iteración 13 — MILESTONE 4: NETWORKING
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 4 — Networking (docker network, container names, internal ports, daemon connection)
+
+**Cambios:**
+- **Runtime: puerto WS separado** — Agregado `CODECK_WS_PORT` env var a `apps/runtime/src/web/server.ts`:
+  - Si está definido y es diferente de `CODECK_PORT`, crea un segundo HTTP server dedicado a WebSocket upgrades
+  - Si no está definido, comportamiento idéntico al actual (WS y HTTP en el mismo server)
+  - Startup log muestra `WS: :PORT` cuando está configurado
+  - Graceful shutdown cierra ambos servers
+- **Daemon: URL WS separada** — Agregado `CODECK_RUNTIME_WS_URL` env var a `apps/daemon/src/services/ws-proxy.ts`:
+  - Default: usa `CODECK_RUNTIME_URL` (mismo URL para HTTP y WS)
+  - Cuando está configurado, WS proxy conecta a URL diferente (e.g., `codeck-runtime:7778`)
+  - Startup log muestra URL WS cuando difiere de la URL HTTP
+  - Exportado `getRuntimeWsUrl()` para logging
+- **Dockerfile + Dockerfile.dev**: Agregado `COPY apps/daemon/dist` para incluir daemon en la imagen
+- **docker-compose.gateway.yml**: Creado compose file para gateway mode:
+  - Red `codeck_net` (bridge driver)
+  - Servicio `runtime`: `container_name: codeck-runtime`, sin puertos expuestos al host, `CODECK_PORT=7777`, `CODECK_WS_PORT=7778`
+  - Servicio `daemon`: expuesto en `:8080`, conecta a runtime por nombre (`http://codeck-runtime:7777/7778`)
+  - Runtime tiene full capabilities (PTY, Docker socket, volumes), daemon es minimal (256MB, solo NET_BIND_SERVICE)
+- **Root package.json**: Actualizado `build` script para incluir `build:daemon`
+
+**Problemas:** Ninguno.
+
+**Decisiones:**
+- El puerto WS separado es **opcional** — controlado por `CODECK_WS_PORT`. Si no está definido, el runtime funciona como siempre (local mode). Esto preserva compatibilidad total con el modo existente
+- El segundo HTTP server para WS solo acepta WebSocket upgrades; cualquier request HTTP normal recibe `426 Upgrade Required`
+- La imagen Docker es compartida entre daemon y runtime (same image, different entrypoints). Esto simplifica builds y es suficiente para el estado actual. Optimización de tamaño de imagen (separar) puede hacerse en futuro si es necesario
+- El daemon en gateway mode es lightweight: 256MB memory limit, 0.5 CPU, sin Docker socket, sin PTY capabilities
+- El runtime en gateway mode NO tiene puertos expuestos al host — solo es alcanzable via `codeck_net`. Esto cumple el requisito de seguridad: "runtime nunca debe estar expuesto en gateway mode"
+- Se usa `bridge` network driver (no `internal`) porque el runtime necesita acceso a internet para operaciones como `npm install`, `git clone`, etc. dentro de los proyectos
+- Los volumes son compartidos entre daemon y runtime para que el daemon pueda leer `auth.json` de `/workspace/.codeck/`
+
+**Smoke test:** `npm run build` — OK (frontend vite → apps/web/dist + backend tsc → apps/runtime/dist + daemon tsc → apps/daemon/dist).
+- Runtime con WS separado (ports 9995/9994): startup OK, muestra `WS: :9994`, WS server listening confirmado
+- Runtime sin WS (port 9992): startup OK, sin línea WS — local mode sin cambios
+- Daemon con WS URL separada (port 9993): startup OK, muestra `Proxying WS to http://localhost:9994`
 
 ---
 

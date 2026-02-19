@@ -14,8 +14,9 @@ COPY package.json package-lock.json ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi \
     && cp -r /prebuilt/node_modules/better-sqlite3 node_modules/better-sqlite3 2>/dev/null || true
 
-# Copy built outputs (runtime backend + web frontend)
+# Copy built outputs (runtime backend + daemon backend + web frontend)
 COPY apps/runtime/dist ./apps/runtime/dist
+COPY apps/daemon/dist ./apps/daemon/dist
 COPY apps/web/dist ./apps/web/dist
 
 # Copy templates into runtime dist (same layout as local build)
