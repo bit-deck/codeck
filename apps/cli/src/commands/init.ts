@@ -108,6 +108,7 @@ export const initCommand = new Command('init')
       placeholder: String(defaultPort),
       defaultValue: String(defaultPort),
       validate: (value) => {
+        if (!value) return undefined; // accept default
         const n = parseInt(value, 10);
         if (isNaN(n) || n < 1 || n > 65535) return 'Port must be 1-65535';
         return undefined;
@@ -140,44 +141,51 @@ export const initCommand = new Command('init')
       const portsResult = await p.multiselect({
         message: 'Pre-map extra ports for dev server preview:',
         options: [
+          { value: 0, label: 'None', hint: 'No extra ports' },
           { value: 3000, label: '3000 (React/Next.js)', hint: defaultExtraPorts.includes(3000) ? 'previously selected' : '' },
           { value: 5173, label: '5173 (Vite)', hint: defaultExtraPorts.includes(5173) ? 'previously selected' : '' },
           { value: 8080, label: '8080 (Generic)', hint: defaultExtraPorts.includes(8080) ? 'previously selected' : '' },
-          { value: -1, label: 'Custom port...' },
+          { value: -1, label: 'Custom port(s)...', hint: 'Comma-separated' },
         ],
         initialValues: defaultExtraPorts.length > 0
           ? defaultExtraPorts.filter(n => [3000, 5173, 8080].includes(n))
-          : [],
-        required: false,
+          : [0],
+        required: true,
       });
       if (p.isCancel(portsResult)) {
         p.outro(chalk.red('Setup cancelled.'));
         process.exit(0);
       }
 
-      extraPorts = (portsResult as number[]).filter(n => n > 0);
+      const selected = portsResult as number[];
 
-      // Handle custom port
-      if ((portsResult as number[]).includes(-1)) {
-        const customResult = await p.text({
-          message: 'Enter custom port(s), comma-separated:',
-          placeholder: '4000, 9090',
-          validate: (value) => {
-            const nums = value.split(',').map(s => parseInt(s.trim(), 10));
-            if (nums.some(n => isNaN(n) || n < 1 || n > 65535)) {
-              return 'Invalid port number';
-            }
-            return undefined;
-          },
-        });
-        if (!p.isCancel(customResult)) {
-          const custom = customResult.split(',').map(s => parseInt(s.trim(), 10));
-          extraPorts = [...extraPorts, ...custom];
+      // "None" selected → no extra ports
+      if (!selected.includes(0)) {
+        extraPorts = selected.filter(n => n > 0);
+
+        // Handle custom ports
+        if (selected.includes(-1)) {
+          const customResult = await p.text({
+            message: 'Enter port(s), comma-separated:',
+            placeholder: '4000, 9090',
+            validate: (value) => {
+              if (!value) return 'Enter at least one port';
+              const nums = value.split(',').map(s => parseInt(s.trim(), 10));
+              if (nums.some(n => isNaN(n) || n < 1 || n > 65535)) {
+                return 'Invalid port number (1-65535)';
+              }
+              return undefined;
+            },
+          });
+          if (!p.isCancel(customResult)) {
+            const custom = customResult.split(',').map(s => parseInt(s.trim(), 10));
+            extraPorts = [...extraPorts, ...custom];
+          }
         }
-      }
 
-      // Remove duplicates
-      extraPorts = [...new Set(extraPorts)].sort((a, b) => a - b);
+        // Remove duplicates
+        extraPorts = [...new Set(extraPorts)].sort((a, b) => a - b);
+      }
     }
 
     // 6. LAN mode (isolated mode only — managed uses daemon for access)
