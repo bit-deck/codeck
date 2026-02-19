@@ -1,10 +1,11 @@
 import { request as httpRequest, IncomingMessage } from 'http';
 import type { Request, Response } from 'express';
 
-// Runtime internal URL — in gateway mode, the runtime is on a private Docker network
+// Runtime internal URL — in managed mode, the runtime is on a private Docker network
 // Default matches the plan: codeck-runtime container on port 7777
 const RUNTIME_URL = process.env.CODECK_RUNTIME_URL || 'http://codeck-runtime:7777';
 const PROXY_TIMEOUT = parseInt(process.env.PROXY_TIMEOUT_MS || '30000', 10);
+const INTERNAL_SECRET = process.env.CODECK_INTERNAL_SECRET || '';
 
 // Headers that should NOT be forwarded to the runtime
 const HOP_BY_HOP = new Set([
@@ -33,6 +34,11 @@ export function proxyToRuntime(req: Request, res: Response): void {
   headers['x-forwarded-for'] = req.ip || '127.0.0.1';
   headers['x-forwarded-proto'] = req.protocol;
   headers['x-forwarded-host'] = req.hostname;
+
+  // Inject internal secret so runtime trusts this proxied request
+  if (INTERNAL_SECRET) {
+    headers['x-codeck-internal'] = INTERNAL_SECRET;
+  }
 
   const proxyReq = httpRequest(
     target.href,

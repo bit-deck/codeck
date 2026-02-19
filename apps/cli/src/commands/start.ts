@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { join } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { getConfig, isInitialized, type CodeckMode } from '../lib/config.js';
 import { composeUp } from '../lib/docker.js';
 
@@ -35,6 +36,10 @@ export const startCommand = new Command('start')
         }
       }
 
+      // In managed mode, generate a shared secret so daemon proxy ↔ runtime
+      // can authenticate internal requests without user tokens.
+      const internalSecret = mode === 'managed' ? randomBytes(32).toString('hex') : undefined;
+
       // Start the runtime container
       await composeUp({
         projectPath: config.projectPath,
@@ -44,6 +49,7 @@ export const startCommand = new Command('start')
         env: sharedDataDir ? {
           // Pass to compose so the bind-mount resolves to the host path
           CODECK_DATA_DIR: sharedDataDir,
+          ...(internalSecret ? { CODECK_INTERNAL_SECRET: internalSecret } : {}),
         } : undefined,
       });
 
@@ -67,6 +73,8 @@ export const startCommand = new Command('start')
             CODECK_COMPOSE_FILE: 'docker/compose.managed.yml',
             // Daemon reads auth.json from the shared data dir
             CODECK_DIR: sharedDataDir!,
+            // Shared secret for daemon ↔ runtime internal auth
+            CODECK_INTERNAL_SECRET: internalSecret!,
             NODE_ENV: 'production',
           },
         });

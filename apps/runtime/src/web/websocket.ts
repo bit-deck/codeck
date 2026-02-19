@@ -78,14 +78,23 @@ export function setupWebSocket(): void {
     clearInterval(heartbeatInterval);
   });
 
+  const INTERNAL_SECRET = process.env.CODECK_INTERNAL_SECRET || '';
+
   wss.on('connection', (ws, req) => {
     // Auth validation for WebSocket
     if (isPasswordConfigured()) {
       const url = new URL(req.url || '', `http://${req.headers.host}`);
-      const token = url.searchParams.get('token');
-      if (!token || !validateSession(token)) {
-        ws.close(4001, 'Unauthorized');
-        return;
+
+      // Trusted proxy bypass — daemon has already authenticated the WS connection
+      const internalParam = url.searchParams.get('_internal');
+      const isTrustedProxy = INTERNAL_SECRET && internalParam === INTERNAL_SECRET;
+
+      if (!isTrustedProxy) {
+        const token = url.searchParams.get('token');
+        if (!token || !validateSession(token)) {
+          ws.close(4001, 'Unauthorized');
+          return;
+        }
       }
     }
 

@@ -209,8 +209,13 @@ export async function startWebServer(): Promise<void> {
     }
   });
   // Auth Middleware (protects all /api/* below)
+  const INTERNAL_SECRET = process.env.CODECK_INTERNAL_SECRET || '';
+
   app.use('/api', (req, res, next) => {
     if (!isPasswordConfigured()) return next();
+
+    // Trusted proxy bypass — daemon has already authenticated the user
+    if (INTERNAL_SECRET && req.headers['x-codeck-internal'] === INTERNAL_SECRET) return next();
 
     // Localhost bypass for memory API — agent inside container has full access
     if (req.path.startsWith('/memory')) {

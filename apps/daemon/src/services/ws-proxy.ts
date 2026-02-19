@@ -9,6 +9,7 @@ const RUNTIME_URL = process.env.CODECK_RUNTIME_URL || 'http://codeck-runtime:777
 const RUNTIME_WS_URL = process.env.CODECK_RUNTIME_WS_URL || RUNTIME_URL;
 const MAX_WS_CONNECTIONS = parseInt(process.env.MAX_WS_CONNECTIONS || '20', 10);
 const WS_PING_INTERVAL_MS = parseInt(process.env.WS_PING_INTERVAL_MS || '30000', 10);
+const INTERNAL_SECRET = process.env.CODECK_INTERNAL_SECRET || '';
 
 // ── Connection tracking ──
 
@@ -112,6 +113,10 @@ export function handleWsUpgrade(
   const targetUrl = new URL(url.pathname + url.search, RUNTIME_WS_URL);
   // Remove daemon token from the proxied request
   targetUrl.searchParams.delete('token');
+  // Inject internal secret so runtime trusts this proxied WS connection
+  if (INTERNAL_SECRET) {
+    targetUrl.searchParams.set('_internal', INTERNAL_SECRET);
+  }
 
   const parsed = new URL(RUNTIME_WS_URL);
 

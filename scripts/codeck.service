@@ -21,8 +21,7 @@ Environment="CODECK_COMPOSE_FILE=docker/compose.managed.yml"
 Environment="HOME=/home/codeck"
 
 ExecStartPre=/usr/bin/mkdir -p /opt/codeck/.codeck-data
-ExecStartPre=/usr/bin/docker compose -f /opt/codeck/docker/compose.managed.yml up -d --wait
-ExecStart=/usr/bin/node /opt/codeck/apps/daemon/dist/index.js
+ExecStart=/bin/bash /opt/codeck/scripts/start-managed.sh
 ExecStopPost=/usr/bin/docker compose -f /opt/codeck/docker/compose.managed.yml down
 
 Restart=always
