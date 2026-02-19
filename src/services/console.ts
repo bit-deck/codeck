@@ -1,5 +1,5 @@
 import { spawn as ptySpawn, type IPty } from 'node-pty';
-import { readFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, renameSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, renameSync, statSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { resolve } from 'path';
 import { realpathSync } from 'fs';
@@ -43,29 +43,38 @@ console.log(`[Console] Agent binary resolved: ${getAgentBinaryPath()}`);
 interface CreateSessionOptions {
   cwd?: string;
   resume?: boolean;
+  useContinue?: boolean;   // use --continue (resumes most recent conv for cwd, no picker)
   continuationPrompt?: string;
   conversationId?: string;
 }
 
 /**
- * Detect the conversation ID for a new Claude session by polling for a new .jsonl file.
+ * Detect the conversation ID for a Claude session by polling the project dir.
+ * - Fresh sessions: wait for a NEW .jsonl file to appear.
+ * - Resume/continue sessions: wait for an EXISTING .jsonl file's mtime to change
+ *   (Claude writes to it when the conversation is resumed).
  * Runs async (fire-and-forget) — does not block session creation.
  */
-function detectConversationId(session: ConsoleSession): void {
+function detectConversationId(session: ConsoleSession, watchExisting = false): void {
   const encoded = encodeProjectPath(session.cwd);
   const projectDir = `${ACTIVE_AGENT.projectsDir}/${encoded}`;
 
-  // Snapshot existing .jsonl files before Claude creates a new one
+  // Snapshot existing .jsonl files (and their mtimes for resume detection)
   const existingFiles = new Set<string>();
+  const existingMtimes = new Map<string, number>();
   try {
     if (existsSync(projectDir)) {
       for (const f of readdirSync(projectDir)) {
-        if (f.endsWith('.jsonl')) existingFiles.add(f);
+        if (!f.endsWith('.jsonl')) continue;
+        existingFiles.add(f);
+        if (watchExisting) {
+          try { existingMtimes.set(f, statSync(`${projectDir}/${f}`).mtimeMs); } catch { /* ignore */ }
+        }
       }
     }
   } catch { /* ignore */ }
 
-  // Poll for new file (500ms intervals, up to 15s)
+  // Poll (500ms intervals, up to 15s)
   let attempts = 0;
   const maxAttempts = 30;
   const interval = setInterval(() => {
@@ -76,11 +85,25 @@ function detectConversationId(session: ConsoleSession): void {
         return;
       }
       const files = readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
-      const newFile = files.find(f => !existingFiles.has(f));
-      if (newFile) {
-        session.conversationId = newFile.replace('.jsonl', '');
+
+      let found: string | undefined;
+      if (watchExisting) {
+        // Resume mode: look for a file whose mtime has changed (Claude wrote to it)
+        found = files.find(f => {
+          try {
+            const mtime = statSync(`${projectDir}/${f}`).mtimeMs;
+            return mtime > (existingMtimes.get(f) ?? 0);
+          } catch { return false; }
+        });
+      } else {
+        // Fresh session: look for a brand-new file
+        found = files.find(f => !existingFiles.has(f));
+      }
+
+      if (found) {
+        session.conversationId = found.replace('.jsonl', '');
         saveSessionState('conversation_detected');
-        console.log(`[Console] Detected conversation: ${session.conversationId}`);
+        console.log(`[Console] Detected conversation: ${session.conversationId} (${watchExisting ? 'resume' : 'new'})`);
         clearInterval(interval);
       } else if (attempts >= maxAttempts) {
         console.warn(`[Console] Could not detect conversation ID for session ${session.id}`);
@@ -112,7 +135,10 @@ export function createConsoleSession(options?: string | CreateSessionOptions): C
 
   // Build CLI args from launch options
   const args: string[] = [];
-  if (opts.resume) {
+  if (opts.useContinue) {
+    // Restore/auto-resume: --continue picks the most recent conversation for this cwd
+    args.push(ACTIVE_AGENT.flags.continue);
+  } else if (opts.resume) {
     if (opts.conversationId) {
       // Auto-restore: resume specific conversation (no picker, no prompt needed)
       args.push(ACTIVE_AGENT.flags.resume, opts.conversationId);
@@ -155,9 +181,14 @@ export function createConsoleSession(options?: string | CreateSessionOptions): C
 
   // Set or detect conversation ID for agent sessions
   if (opts.conversationId) {
+    // Known ID (auto-restore): set directly
     session.conversationId = opts.conversationId;
+  } else if (opts.useContinue || (opts.resume && !opts.conversationId)) {
+    // --continue or interactive --resume: detect which existing conversation was touched
+    detectConversationId(session, true);
   } else if (!opts.resume) {
-    detectConversationId(session);
+    // Fresh session: detect the new .jsonl file that Claude creates
+    detectConversationId(session, false);
   }
 
   // Start session capture for transcript logging
@@ -406,41 +437,21 @@ export function restoreSavedSessions(): Array<{ id: string; type: string; cwd: s
   const restored: Array<{ id: string; type: string; cwd: string; name: string }> = [];
 
   for (const saved of state.sessions) {
-    // If conversationId is missing (e.g. saved before detection completed or symlink bug),
-    // fall back to the most recent .jsonl file in the project dir for this cwd.
-    if (saved.type === 'agent' && !saved.conversationId) {
-      const encoded = encodeProjectPath(saved.cwd);
-      const projectDir = `${ACTIVE_AGENT.projectsDir}/${encoded}`;
-      try {
-        if (existsSync(projectDir)) {
-          const files = readdirSync(projectDir)
-            .filter(f => f.endsWith('.jsonl'))
-            .sort(); // UUIDs sort lexically; latest is last
-          if (files.length > 0) {
-            saved.conversationId = files[files.length - 1].replace('.jsonl', '');
-            console.log(`[Console] Inferred conversationId for ${saved.id.slice(0, 8)}: ${saved.conversationId.slice(0, 8)} (from ${projectDir})`);
-          } else {
-            console.warn(`[Console] No .jsonl files in ${projectDir} for session ${saved.id.slice(0, 8)} — will start fresh`);
-          }
-        } else {
-          console.warn(`[Console] Project dir missing: ${projectDir} for session ${saved.id.slice(0, 8)} — will start fresh`);
-        }
-      } catch (e) {
-        console.warn(`[Console] Could not infer conversationId for ${saved.id.slice(0, 8)}:`, (e as Error).message);
-      }
-    }
-
     console.log(`[Console] Restoring session ${saved.id.slice(0, 8)}: type=${saved.type}, cwd=${saved.cwd}, conversationId=${saved.conversationId?.slice(0, 8) || 'none'}`);
     try {
       // Validate saved cwd exists, fallback to /workspace
       const cwd = existsSync(saved.cwd) ? saved.cwd : '/workspace';
       if (saved.type === 'agent') {
-        const session = createConsoleSession({
-          cwd,
-          resume: !!saved.conversationId,
-          conversationId: saved.conversationId,
-          continuationPrompt: saved.continuationPrompt,
-        });
+        let session: ConsoleSession;
+        if (saved.conversationId) {
+          // Best case: we have the exact conversation ID — resume it directly
+          session = createConsoleSession({ cwd, resume: true, conversationId: saved.conversationId });
+        } else {
+          // Fallback: use --continue to resume the most recent conversation for this cwd
+          // (no interactive picker, no conversationId needed)
+          console.log(`[Console] No conversationId for ${saved.id.slice(0, 8)}, using --continue`);
+          session = createConsoleSession({ cwd, useContinue: true });
+        }
         restored.push({ id: session.id, type: session.type, cwd: session.cwd, name: session.name });
       } else {
         const session = createShellSession(cwd);
