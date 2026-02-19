@@ -8,6 +8,7 @@ interface TerminalInstance {
   term: Terminal;
   fitAddon: FitAddon;
   resizeObserver: ResizeObserver | null;
+  container: HTMLElement;
 }
 
 const terminals = new Map<string, TerminalInstance>();
@@ -110,7 +111,7 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
   });
   resizeObserver.observe(container);
 
-  const instance: TerminalInstance = { term, fitAddon, resizeObserver };
+  const instance: TerminalInstance = { term, fitAddon, resizeObserver, container };
   terminals.set(sessionId, instance);
   return instance;
 }
@@ -131,10 +132,19 @@ export function destroyTerminal(sessionId: string): void {
 
 export function fitTerminal(sessionId: string): void {
   const instance = terminals.get(sessionId);
-  if (instance) {
-    instance.fitAddon.fit();
-    wsSend({ type: 'console:resize', sessionId, cols: instance.term.cols, rows: instance.term.rows });
-  }
+  if (!instance) return;
+  // Don't fit against a hidden container — FitAddon gets 0-size dimensions
+  // and would send incorrect cols/rows to the PTY (display:none → offsetWidth=0).
+  if (instance.container.offsetWidth === 0 || instance.container.offsetHeight === 0) return;
+  instance.fitAddon.fit();
+  wsSend({ type: 'console:resize', sessionId, cols: instance.term.cols, rows: instance.term.rows });
+}
+
+/** Returns the current terminal dimensions, or null if not found / hidden. */
+export function getTerminalDimensions(sessionId: string): { cols: number; rows: number } | null {
+  const instance = terminals.get(sessionId);
+  if (!instance) return null;
+  return { cols: instance.term.cols, rows: instance.term.rows };
 }
 
 export function writeToTerminal(sessionId: string, data: string): void {

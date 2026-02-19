@@ -33,9 +33,17 @@ const MAX_RECONNECT_ATTEMPTS = 15;
 // to prevent duplicate console:attach messages on reconnect.
 const attachedSessions = new Set<string>();
 
-// Buffer the last resize message sent while disconnected so terminal
-// dimensions are correct immediately after reconnection.
-let pendingResize: object | null = null;
+// Buffer the last resize per session sent while disconnected.
+// On reconnect, all buffered resizes are flushed so every terminal
+// gets its correct dimensions — not just the last one that fired.
+const pendingResizes = new Map<string, object>();
+
+// Called after each session is re-attached on reconnect, so the
+// terminal layer can resync PTY dimensions for that session.
+let onSessionReattached: ((sessionId: string) => void) | null = null;
+export function setOnSessionReattached(handler: (sessionId: string) => void): void {
+  onSessionReattached = handler;
+}
 
 type OutputHandler = (sessionId: string, data: string) => void;
 type ExitHandler = (sessionId: string) => void;
@@ -52,8 +60,12 @@ export function wsSend(msg: object): void {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
   } else if ((msg as any).type === 'console:resize') {
-    // Buffer the latest resize so it can be flushed after reconnect
-    pendingResize = msg;
+    // Buffer resize per session — replaces any previous buffered resize for
+    // this session. On reconnect, all sessions get their dimensions flushed.
+    const sessionId = (msg as any).sessionId;
+    if (typeof sessionId === 'string') {
+      pendingResizes.set(sessionId, msg);
+    }
   }
 }
 
@@ -84,11 +96,12 @@ export function connectWebSocket(): void {
     // the server's current session list. Attaching stale IDs after a
     // container restart causes frozen terminals.
 
-    // Flush any resize message that was buffered while disconnected
-    if (pendingResize) {
-      wsSend(pendingResize);
-      pendingResize = null;
+    // Flush all buffered resize messages (one per session) so every terminal
+    // gets its correct dimensions on reconnect, not just the last one.
+    for (const msg of pendingResizes.values()) {
+      ws!.send(JSON.stringify(msg));
     }
+    pendingResizes.clear();
 
     // Start stale connection detector — if server stops sending heartbeats,
     // the connection is dead and we need to reconnect.
@@ -115,9 +128,11 @@ export function connectWebSocket(): void {
       if (msg.type === 'status') {
         if (typeof msg.data !== 'object' || msg.data === null) return;
         updateStateFromServer(msg.data);
-        // After state sync, re-attach all current sessions
+        // After state sync, re-attach all current sessions and notify
+        // the terminal layer so it can resync PTY dimensions per session.
         sessions.value.forEach(s => {
           attachSession(s.id);
+          onSessionReattached?.(s.id);
         });
       } else if (msg.type === 'log') {
         if (!isLogEntry(msg.data)) return;

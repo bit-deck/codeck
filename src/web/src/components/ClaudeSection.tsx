@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile, restoringPending } from '../state/store';
 import { apiFetch } from '../api';
 import { createTerminal, destroyTerminal, fitTerminal, focusTerminal, writeToTerminal } from '../terminal';
-import { wsSend, setTerminalHandlers, attachSession } from '../ws';
+import { wsSend, setTerminalHandlers, attachSession, setOnSessionReattached } from '../ws';
 import { IconPlus, IconX, IconShell, IconTerminal } from './Icons';
 import { MobileTerminalToolbar } from './MobileTerminalToolbar';
 
@@ -19,8 +19,14 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
   const sessionList = sessions.value;
   const activeId = activeSessionId.value;
 
-  // Register terminal handlers for WS output/exit
+  // Register terminal handlers for WS output/exit and post-reconnect resync
   useEffect(() => {
+    // After WS reconnects and a session is re-attached, resync PTY dimensions.
+    // Uses rAF so the terminal container has its correct layout size before fitting.
+    setOnSessionReattached((sessionId) => {
+      requestAnimationFrame(() => fitTerminal(sessionId));
+    });
+
     setTerminalHandlers(
       (sessionId, data) => writeToTerminal(sessionId, data),
       (sessionId) => {
@@ -56,10 +62,15 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
       el.id = 'term-' + s.id;
       container.appendChild(el);
 
-      const instance = createTerminal(s.id, el);
+      createTerminal(s.id, el);
 
       attachSession(s.id);
-      wsSend({ type: 'console:resize', sessionId: s.id, cols: instance.term.cols, rows: instance.term.rows });
+      // Defer fit until the browser has laid out the terminal container.
+      // createTerminal → term.open() is synchronous but the container may not
+      // have its final dimensions until the next frame (especially for the
+      // non-active terminals that start with display:none).
+      const sid = s.id;
+      requestAnimationFrame(() => fitTerminal(sid));
     }
 
   }, [sessionList.length]);
@@ -72,10 +83,12 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
     container.querySelectorAll('.terminal-instance').forEach(el => el.classList.remove('active'));
     const activeEl = document.getElementById('term-' + activeId);
     if (activeEl) activeEl.classList.add('active');
-    setTimeout(() => {
+    // Use rAF so the browser has applied display:block (CSS active class) and
+    // computed the container's layout dimensions before FitAddon measures them.
+    requestAnimationFrame(() => {
       fitTerminal(activeId);
       focusTerminal(activeId);
-    }, 50);
+    });
   }, [activeId]);
 
   function startEditingTab(id: string, currentName: string) {
@@ -102,10 +115,10 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
 
   function switchToSession(id: string) {
     setActiveSessionId(id);
-    setTimeout(() => {
+    requestAnimationFrame(() => {
       fitTerminal(id);
       focusTerminal(id);
-    }, 50);
+    });
   }
 
   function closeSession(id: string) {
@@ -253,12 +266,14 @@ export function mountTerminalForSession(sessionId: string, cwd: string, name?: s
   }
   setActiveSessionId(sessionId);
 
-  setTimeout(() => {
+  // Attach immediately so the backend starts streaming output, then fit on
+  // the next frame once the container has its correct layout dimensions.
+  attachSession(sessionId);
+  requestAnimationFrame(() => {
     instance.fitAddon.fit();
-    attachSession(sessionId);
     wsSend({ type: 'console:resize', sessionId, cols: instance.term.cols, rows: instance.term.rows });
     instance.term.focus();
-  }, 100);
+  });
 
   addLocalLog('info', 'Session started: ' + cwd);
 }
