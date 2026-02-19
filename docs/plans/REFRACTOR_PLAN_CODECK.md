@@ -67,7 +67,7 @@ scripts/
 - [x] MILESTONE 0 — PREPARACIÓN (completado)
 - [x] MILESTONE 1 — WEBAPP (completado)
 - [x] MILESTONE 2 — RUNTIME (completado)
-- [ ] MILESTONE 3 — DAEMON (siguiente: 3.2)
+- [ ] MILESTONE 3 — DAEMON (siguiente: 3.3)
 
 ---
 
@@ -134,11 +134,11 @@ DONE cuando:
 - [x] /api/ui/status
 
 ## 3.2 Auth + sesiones
-- [ ] login/logout
-- [ ] listar sesiones
-- [ ] revoke session
-- [ ] deviceId estable
-- [ ] lastSeen update
+- [x] login/logout
+- [x] listar sesiones
+- [x] revoke session
+- [x] deviceId estable
+- [x] lastSeen update
 
 ## 3.3 Auditoría
 - [ ] audit.log JSONL

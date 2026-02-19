@@ -3,6 +3,16 @@ import helmet from 'helmet';
 import { createServer } from 'http';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import {
+  isPasswordConfigured,
+  validatePassword,
+  validateSession,
+  touchSession,
+  invalidateSession,
+  getActiveSessions,
+  revokeSessionById,
+  getAuthLog,
+} from './services/auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.CODECK_DAEMON_PORT || '8080', 10);
@@ -25,7 +35,67 @@ export async function startDaemon(): Promise<void> {
 
   app.use(express.json());
 
-  // Daemon status endpoint — public, no auth required
+  // ── Rate limiting (auth endpoints) ──
+
+  const AUTH_RATE_LIMIT = 10; // max requests per window
+  const AUTH_RATE_WINDOW = 60_000; // 1 minute
+  const authRateMap = new Map<string, { count: number; windowStart: number }>();
+
+  // Cleanup stale entries every 5 minutes
+  const rateCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of authRateMap) {
+      if (now - entry.windowStart > AUTH_RATE_WINDOW * 2) authRateMap.delete(ip);
+    }
+  }, 5 * 60_000);
+  rateCleanupInterval.unref();
+
+  function checkAuthRateLimit(ip: string): boolean {
+    const now = Date.now();
+    const entry = authRateMap.get(ip);
+    if (!entry || now - entry.windowStart > AUTH_RATE_WINDOW) {
+      authRateMap.set(ip, { count: 1, windowStart: now });
+      return true;
+    }
+    entry.count++;
+    return entry.count <= AUTH_RATE_LIMIT;
+  }
+
+  // ── Brute-force lockout ──
+
+  const LOCKOUT_THRESHOLD = 5;
+  const LOCKOUT_DURATION_MS = 15 * 60_000; // 15 minutes
+  const failedAttempts = new Map<string, { count: number; lockedUntil: number }>();
+
+  function checkLockout(ip: string): { locked: boolean; retryAfter?: number } {
+    const entry = failedAttempts.get(ip);
+    if (!entry) return { locked: false };
+    if (entry.lockedUntil > Date.now()) {
+      return { locked: true, retryAfter: Math.ceil((entry.lockedUntil - Date.now()) / 1000) };
+    }
+    if (entry.lockedUntil > 0) {
+      failedAttempts.delete(ip);
+    }
+    return { locked: false };
+  }
+
+  function recordFailedLogin(ip: string): void {
+    const entry = failedAttempts.get(ip) || { count: 0, lockedUntil: 0 };
+    entry.count++;
+    if (entry.count >= LOCKOUT_THRESHOLD) {
+      entry.lockedUntil = Date.now() + LOCKOUT_DURATION_MS;
+      entry.count = 0;
+    }
+    failedAttempts.set(ip, entry);
+  }
+
+  function clearFailedAttempts(ip: string): void {
+    failedAttempts.delete(ip);
+  }
+
+  // ── Public endpoints (no auth required) ──
+
+  // Daemon status
   app.get('/api/ui/status', (_req, res) => {
     res.json({
       status: 'ok',
@@ -33,6 +103,95 @@ export async function startDaemon(): Promise<void> {
       uptime: process.uptime(),
     });
   });
+
+  // Auth status — check if password is configured
+  app.get('/api/auth/status', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ configured: isPasswordConfigured() });
+  });
+
+  // Login
+  app.post('/api/auth/login', async (req, res) => {
+    const ip = req.ip || 'unknown';
+
+    if (!checkAuthRateLimit(ip)) {
+      res.status(429).json({ success: false, error: 'Too many requests. Try again later.' });
+      return;
+    }
+
+    const lockout = checkLockout(ip);
+    if (lockout.locked) {
+      res.status(429).json({
+        success: false,
+        error: 'Too many failed attempts. Try again later.',
+        retryAfter: lockout.retryAfter,
+      });
+      return;
+    }
+
+    const { password, deviceId } = req.body;
+    if (!password) {
+      res.status(400).json({ success: false, error: 'Password required' });
+      return;
+    }
+
+    const result = await validatePassword(password, ip, deviceId || 'unknown');
+    if (result.success) {
+      clearFailedAttempts(ip);
+      res.json({ success: true, token: result.token });
+    } else {
+      recordFailedLogin(ip);
+      res.status(401).json({ success: false, error: 'Incorrect password' });
+    }
+  });
+
+  // ── Auth middleware (protects all /api/* below) ──
+
+  app.use('/api', (req, res, next) => {
+    if (!isPasswordConfigured()) return next();
+
+    const token = req.headers.authorization?.replace('Bearer ', '') || (req.query.token as string | undefined);
+    if (!token || !validateSession(token)) {
+      res.status(401).json({ error: 'Unauthorized', needsAuth: true });
+      return;
+    }
+
+    // Update lastSeen for active session
+    touchSession(token);
+    next();
+  });
+
+  // ── Protected endpoints ──
+
+  // Logout
+  app.post('/api/auth/logout', (req, res) => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (token) invalidateSession(token);
+    res.json({ success: true });
+  });
+
+  // List active sessions
+  app.get('/api/auth/sessions', (req, res) => {
+    const currentToken = req.headers.authorization?.replace('Bearer ', '');
+    res.json({ sessions: getActiveSessions(currentToken) });
+  });
+
+  // Revoke a session by ID
+  app.delete('/api/auth/sessions/:id', (req, res) => {
+    const revoked = revokeSessionById(req.params.id);
+    if (!revoked) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json({ success: true });
+  });
+
+  // Auth event log
+  app.get('/api/auth/log', (_req, res) => {
+    res.json({ events: getAuthLog() });
+  });
+
+  // ── Static files & SPA ──
 
   // Serve static web assets (same caching strategy as runtime)
   app.use(express.static(WEB_DIST, {
@@ -61,6 +220,7 @@ export async function startDaemon(): Promise<void> {
   // Graceful shutdown
   function gracefulShutdown(signal: string): void {
     console.log(`[Daemon] Received ${signal}, shutting down...`);
+    clearInterval(rateCleanupInterval);
     server.close(() => {
       console.log('[Daemon] Closed cleanly');
       process.exit(0);

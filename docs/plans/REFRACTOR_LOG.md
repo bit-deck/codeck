@@ -8,7 +8,7 @@ Este archivo registra el progreso y decisiones técnicas.
 
 Branch: refactor/daemon-runtime-gateway
 Modo objetivo: local + gateway
-Último bloque completado: MILESTONE 3.1 — Daemon Server Base
+Último bloque completado: MILESTONE 3.2 — Auth + Sesiones
 
 ---
 
@@ -257,6 +257,44 @@ Modo objetivo: local + gateway
 - El `trust proxy` está habilitado (`app.set('trust proxy', 1)`) porque en gateway mode hay nginx delante del daemon
 
 **Smoke test:** `npm run build` — OK (frontend vite → apps/web/dist + backend tsc → apps/runtime/dist + daemon tsc → apps/daemon/dist). Startup en port 9998: `/api/ui/status` → `{"status":"ok","mode":"gateway","uptime":2.01}`, SPA catch-all → HTTP 200. Shutdown limpio.
+
+---
+
+### Iteración 9 — MILESTONE 3.2: AUTH + SESIONES
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 3.2 — Auth + sesiones (login/logout, listar sesiones, revoke, deviceId, lastSeen)
+
+**Cambios:**
+- Creado `apps/daemon/src/services/auth.ts` — servicio de autenticación completo para el daemon:
+  - Lee `auth.json` compartido con runtime (misma contraseña, mismo scrypt) via `CODECK_DIR` env var
+  - Sesiones propias persistidas en `daemon-sessions.json` (separadas de runtime)
+  - `SessionData` incluye `deviceId` y `lastSeen` (extensiones vs runtime)
+  - Verificación de password con soporte legacy SHA-256 y scrypt (timing-safe comparison)
+  - Auth event log circular (200 entries max)
+  - `touchSession()` con debounce de 60s para actualizar `lastSeen` sin I/O excesivo
+  - `atomicWriteFileSync` local (no depende de runtime)
+- Actualizado `apps/daemon/src/server.ts` — endpoints de auth y middleware:
+  - **Públicos (sin auth):** `GET /api/auth/status`, `POST /api/auth/login` (acepta `deviceId`)
+  - **Protegidos:** `POST /api/auth/logout`, `GET /api/auth/sessions`, `DELETE /api/auth/sessions/:id`, `GET /api/auth/log`
+  - Auth middleware en `/api` con soporte Bearer header y `?token=` query param
+  - `touchSession()` llamado en cada request autenticado (actualiza `lastSeen`)
+  - Rate limiting: 10 req/min por IP en auth endpoints, cleanup cada 5 min
+  - Brute-force lockout: 5 intentos fallidos → 15 min lockout por IP
+  - Cleanup del rate interval en graceful shutdown
+
+**Problemas:** Ninguno.
+
+**Decisiones:**
+- El daemon NO gestiona password setup/change — eso es responsabilidad exclusiva del runtime. El daemon solo lee `auth.json` y valida contra él
+- Las sesiones del daemon son completamente independientes de las del runtime — archivos separados, maps separados. Un login en runtime no crea sesión en daemon y viceversa
+- El daemon NO hace opportunistic rehash de passwords legacy — eso lo hace el runtime cuando el usuario hace login ahí. El daemon es read-only respecto al hash
+- `deviceId` se recibe como parámetro del `POST /api/auth/login` body — es responsabilidad del frontend generar y persistir un deviceId estable (localStorage UUID)
+- `lastSeen` se actualiza via `touchSession()` con debounce de 60s para evitar escrituras a disco en cada request. El timer usa `.unref()` para no bloquear el shutdown
+- La lista de sesiones se ordena por `lastSeen` (desc) en vez de `createdAt` — más útil para el usuario
+- No se implementa `POST /api/auth/setup` en el daemon — la configuración inicial de password se hace via runtime en modo local, antes de exponer el daemon como gateway
+
+**Smoke test:** `npm run build` — OK (frontend + runtime). `npm run build:daemon` — OK. Startup en port 9997: `/api/auth/status` → `{"configured":true}`, `/api/auth/login` → rechaza password incorrecto (401), `/api/auth/sessions` → protegido (401 sin auth), `/api/auth/log` → protegido (401 sin auth), `/api/ui/status` → público, SPA catch-all → HTTP 200. Shutdown limpio.
 
 ---
 
