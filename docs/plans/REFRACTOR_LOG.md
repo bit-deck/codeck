@@ -9,6 +9,7 @@ Este archivo registra el progreso y decisiones técnicas.
 Branch: refactor/daemon-runtime-gateway
 Modo objetivo: local + gateway
 Último bloque completado: MILESTONE 5 — CLI
+Estado: **TODOS LOS MILESTONES COMPLETADOS** (0-5, 15 iteraciones)
 
 ---
 
@@ -406,7 +407,44 @@ Modo objetivo: local + gateway
 
 ---
 
-### Iteración 13 — MILESTONE 4: NETWORKING
+### Iteración 13 — MILESTONE 3.6: PROXY WS
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 3.6 — Proxy WebSocket (Browser WS → daemon → runtime, límite conexiones, heartbeat)
+
+**Cambios:**
+- Creado `apps/daemon/src/services/ws-proxy.ts` — proxy WebSocket completo browser→daemon→runtime:
+  - `handleWsUpgrade(req, socket, head)` — maneja HTTP upgrade requests, autentica vía `?token=`, proxea a runtime
+  - Autenticación: valida session token del daemon, toca sesión para refresh TTL
+  - Límite conexiones: máximo 20 concurrentes (configurable via `MAX_WS_CONNECTIONS`), retorna 503 si excedido
+  - Heartbeat: ping frames cada 30s (`WS_PING_INTERVAL_MS`), detecta pong responses, cierra conexiones inactivas tras 2.5x el intervalo (75s)
+  - Bidirectional pipe: `clientSocket` ↔ `runtimeSocket` via `pipe()` eficiente
+  - Timeouts: 10s para upgrade request (504), errores de conexión (502), auth failures (401)
+  - Smart cleanup: ping interval se detiene cuando no hay conexiones activas
+  - `shutdownWsProxy()` — cierra todas las conexiones activas y limpia timers
+  - `getWsConnectionCount()` — expuesto en `/api/daemon/status`
+  - `getRuntimeWsUrl()` — getter para logging
+- Actualizado `apps/daemon/src/server.ts`:
+  - Import de funciones ws-proxy
+  - Registrado `server.on('upgrade')` handler
+  - Agregado `wsConnections` en respuesta de `/api/daemon/status`
+  - `shutdownWsProxy()` integrado en graceful shutdown
+- **MILESTONE 3 — DAEMON está ahora COMPLETO**
+
+**Problemas:** Ninguno.
+
+**Decisiones:**
+- El proxy opera a nivel de socket (raw TCP) después del HTTP upgrade — no interpreta frames WebSocket, solo los retransmite bidireccionalmente via `pipe()`. Excepción: los ping/pong frames del heartbeat
+- La URL del runtime WS es configurable por separado (`CODECK_RUNTIME_WS_URL`) para soportar puertos HTTP y WS separados en el runtime (milestone 4)
+- El heartbeat usa WebSocket ping frames nativos (opcode 0x9/0xA), no mensajes de aplicación — transparente para el código del cliente
+- El skip de auth cuando no hay password configurado es intencional — permite desarrollo sin setup de password
+- La conexión tracking usa un `Set<WsConnection>` con metadata (clientSocket, runtimeSocket, alive flag) para cleanup eficiente
+
+**Smoke test:** `npm run build` — OK (frontend + runtime + daemon). Daemon WS proxy registrado en startup. Shutdown limpio con cierre de conexiones activas.
+
+---
+
+### Iteración 14 — MILESTONE 4: NETWORKING
 **Fecha:** 2026-02-19
 
 **Bloque:** Milestone 4 — Networking (docker network, container names, internal ports, daemon connection)
@@ -448,7 +486,7 @@ Modo objetivo: local + gateway
 
 ---
 
-### Iteración 14 — MILESTONE 5: CLI
+### Iteración 15 — MILESTONE 5: CLI
 **Fecha:** 2026-02-19
 
 **Bloque:** Milestone 5 — CLI (codeck init, codeck start --mode local/gateway, stop/status/logs)
