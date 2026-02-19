@@ -3,8 +3,18 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "main": "dist/index.js",
   "scripts": {
-    "build": "echo 'daemon: placeholder — will be populated in milestone 3'",
-    "clean": "rm -rf dist"
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "helmet": "^8.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.0",
+    "@types/node": "^20.0.0"
   }
 }

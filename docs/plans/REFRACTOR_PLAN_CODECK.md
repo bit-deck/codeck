@@ -67,7 +67,7 @@ scripts/
 - [x] MILESTONE 0 — PREPARACIÓN (completado)
 - [x] MILESTONE 1 — WEBAPP (completado)
 - [x] MILESTONE 2 — RUNTIME (completado)
-- [ ] MILESTONE 3 — DAEMON (siguiente: 3.1)
+- [ ] MILESTONE 3 — DAEMON (siguiente: 3.2)
 
 ---
 
@@ -129,9 +129,9 @@ DONE cuando:
 # MILESTONE 3 — DAEMON
 
 ## 3.1 Server base
-- [ ] apps/daemon en :8080
-- [ ] Servir web estática
-- [ ] /api/ui/status
+- [x] apps/daemon en :8080
+- [x] Servir web estática
+- [x] /api/ui/status
 
 ## 3.2 Auth + sesiones
 - [ ] login/logout

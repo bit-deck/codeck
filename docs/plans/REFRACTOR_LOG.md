@@ -8,7 +8,7 @@ Este archivo registra el progreso y decisiones técnicas.
 
 Branch: refactor/daemon-runtime-gateway
 Modo objetivo: local + gateway
-Último bloque completado: MILESTONE 2.5 — Memory/Index (MILESTONE 2 COMPLETO)
+Último bloque completado: MILESTONE 3.1 — Daemon Server Base
 
 ---
 
@@ -223,6 +223,40 @@ Modo objetivo: local + gateway
 - Con esto se completa MILESTONE 2 — el runtime tiene feature parity con el sistema original
 
 **Smoke test:** `npm run build` — OK (frontend vite → apps/web/dist + backend tsc → apps/runtime/dist + copy:templates). Startup en port 9999: `/internal/status` → `{"status":"ok","uptime":4.01}`, `/api/memory/status` → `{"durableExists":true,"dailyCount":1,"pathScopes":3}`, `/api/memory/search?q=codeck` → resultados encontrados, `/api/memory/search/stats` → `{"available":true,"fileCount":47,"chunkCount":231}`. Shutdown limpio.
+
+---
+
+### Iteración 8 — MILESTONE 3.1: DAEMON SERVER BASE
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 3.1 — Daemon server base (apps/daemon en :8080, servir web estática, /api/ui/status)
+
+**Cambios:**
+- Actualizado `apps/daemon/package.json` de placeholder a configuración real: dependencias (express, helmet), devDeps (@types/express, @types/node), scripts (tsc build), main apunta a `dist/index.js`
+- Creado `apps/daemon/tsconfig.json` — idéntico al de runtime (ES2022, NodeNext, strict)
+- Creado `apps/daemon/src/index.ts` — entry point minimal, delega a `startDaemon()`
+- Creado `apps/daemon/src/server.ts` — servidor Express con:
+  - Puerto configurable via `CODECK_DAEMON_PORT` (default: 8080)
+  - `helmet()` con misma configuración que runtime
+  - `GET /api/ui/status` → `{ status: "ok", mode: "gateway", uptime: <seconds> }`
+  - Static file serving desde `apps/web/dist/` (misma estrategia de cache que runtime)
+  - SPA catch-all para client-side routing
+  - Error handler centralizado (CWE-209 safe)
+  - Graceful shutdown con SIGTERM/SIGINT y timeout de 5s
+- Actualizado root `package.json`: agregado script `build:daemon` (`npm run build -w @codeck/daemon`)
+
+**Problemas:** Ninguno.
+
+**Decisiones:**
+- El daemon usa `createServer(app)` en vez de `app.listen()` — anticipa WebSocket upgrade handling en milestone 3.6
+- La ruta de web estática es `join(__dirname, '../../web/dist')` desde `apps/daemon/dist/` — diferente a runtime que es `../../../web/dist` (runtime tiene un nivel más de profundidad por su subdirectorio `web/`)
+- `/api/ui/status` expone `mode: "gateway"` — esto permitirá al frontend detectar el modo sin hardcodes en futuras iteraciones
+- No se incluyen devDependencies de tsx/typescript en el daemon — se heredan del root workspace
+- El daemon NO tiene autenticación propia aún — eso es milestone 3.2
+- El daemon NO proxea requests al runtime aún — eso es milestone 3.5/3.6
+- El `trust proxy` está habilitado (`app.set('trust proxy', 1)`) porque en gateway mode hay nginx delante del daemon
+
+**Smoke test:** `npm run build` — OK (frontend vite → apps/web/dist + backend tsc → apps/runtime/dist + daemon tsc → apps/daemon/dist). Startup en port 9998: `/api/ui/status` → `{"status":"ok","mode":"gateway","uptime":2.01}`, SPA catch-all → HTTP 200. Shutdown limpio.
 
 ---
 
