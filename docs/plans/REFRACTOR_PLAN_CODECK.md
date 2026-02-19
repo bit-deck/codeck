@@ -66,7 +66,7 @@ scripts/
 
 - [x] MILESTONE 0 — PREPARACIÓN (completado)
 - [x] MILESTONE 1 — WEBAPP (completado)
-- [ ] MILESTONE 2 — RUNTIME (en progreso: 2.1–2.3 completados, siguiente: 2.4)
+- [ ] MILESTONE 2 — RUNTIME (en progreso: 2.1–2.4 completados, siguiente: 2.5)
 
 ---
 
@@ -113,9 +113,9 @@ DONE cuando:
 - [x] read/write/list/delete/rename
 
 ## 2.4 Proactive Agents
-- [ ] CRUD
-- [ ] Scheduler
-- [ ] Eventos create/update/delete/run
+- [x] CRUD
+- [x] Scheduler
+- [x] Eventos create/update/delete/run
 
 ## 2.5 Memory/Index
 - [ ] Migrar implementación existente

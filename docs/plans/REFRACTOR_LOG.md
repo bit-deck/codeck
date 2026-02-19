@@ -8,7 +8,7 @@ Este archivo registra el progreso y decisiones técnicas.
 
 Branch: refactor/daemon-runtime-gateway
 Modo objetivo: local + gateway
-Último bloque completado: MILESTONE 2.3 — Filesystem
+Último bloque completado: MILESTONE 2.4 — Proactive Agents
 
 ---
 
@@ -164,6 +164,33 @@ Modo objetivo: local + gateway
 - No se agregan delete/rename a las rutas de agent data (`codeck.routes.ts`) — ese scope es intencionalmente restrictivo (solo lectura/escritura de archivos existentes)
 
 **Smoke test:** `npm run build` — OK (frontend vite → apps/web/dist + backend tsc → apps/runtime/dist + copy:templates). Startup en port 9999: `/internal/status` → `{"status":"ok","uptime":3.04}`, `/api/auth/status` → `{"configured":true}`. Shutdown limpio.
+
+---
+
+### Iteración 6 — MILESTONE 2.4: PROACTIVE AGENTS
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 2.4 — Proactive Agents (CRUD, Scheduler, Events)
+
+**Cambios:**
+- Verificación de completitud: todo el subsistema de proactive agents ya fue migrado en milestone 2.1 (git mv de `src/` a `apps/runtime/src/`)
+- No se requirieron cambios de código — la implementación existente cubre los tres puntos del milestone
+
+**Componentes verificados:**
+- **CRUD**: `proactive-agents.ts` exporta `createAgent`, `getAgent`, `listAgents`, `updateAgent`, `deleteAgent` — rutas REST completas en `agents.routes.ts` (POST/GET/PUT/DELETE `/api/agents`)
+- **Scheduler**: `node-cron` integrado con `scheduleCron`, `stopCron`, `computeNextRun`, queue por cwd, misfire detection, max concurrency (2), max agents (10)
+- **Eventos**: WebSocket broadcast de `agent:update`, `agent:execution:start`, `agent:execution:complete`, `agent:output`, `agent:misfire` — cubren create/update/delete/run del plan
+- **Wiring en server.ts**: import (L37-38), route registration (L288), init (L379), shutdown (L329) — todo correcto
+
+**Problemas:** Ninguno.
+
+**Decisiones:**
+- Este milestone no requirió cambios de código porque el subsistema completo fue migrado intacto en 2.1 (via `git mv` que preservó toda la estructura interna de `src/`)
+- Los "Eventos create/update/delete/run" del plan se interpretan como los WebSocket broadcasts existentes, no como audit log entries (el audit log JSONL es parte de Milestone 3.3 — Daemon)
+- La persistencia de agents en `/workspace/.codeck/agents/` ya estaba funcionando (2 agents activos restaurados en startup test)
+- Dependencia `node-cron@^3.0.3` ya está en `apps/runtime/package.json`
+
+**Smoke test:** `npm run build` — OK (frontend vite → apps/web/dist + backend tsc → apps/runtime/dist + copy:templates). Startup en port 9999: `/internal/status` funcionando, 2 agents restaurados correctamente (`Polymarket Bot`, `Codeck Refactor Implementation`), cron scheduling activo. Shutdown limpio con `[ProactiveAgents] Shutdown complete (2 agents)`.
 
 ---
 
