@@ -306,14 +306,26 @@ export const initCommand = new Command('init')
       p.log.info('Base image already built.');
     }
 
-    // Done
+    // 12. Offer to start
+    const startResult = await p.confirm({
+      message: 'Start Codeck now?',
+      initialValue: true,
+    });
+
     p.outro(chalk.green('Setup complete!'));
-    console.log();
-    console.log(chalk.dim('  Next steps:'));
-    console.log(chalk.dim('    codeck start    — Start Codeck'));
-    console.log(chalk.dim('    codeck open     — Open webapp in browser'));
-    console.log(chalk.dim('    codeck status   — Check container status'));
-    console.log(chalk.dim('    codeck logs     — Stream container logs'));
-    console.log(chalk.dim('    codeck doctor   — Diagnose issues'));
-    console.log();
+
+    if (!p.isCancel(startResult) && startResult) {
+      // Delegate to `codeck start` — handles both isolated and managed mode correctly
+      const { execa } = await import('execa');
+      await execa(process.execPath, [process.argv[1], 'start'], { stdio: 'inherit' });
+    } else {
+      console.log();
+      console.log(chalk.dim('  Next steps:'));
+      console.log(chalk.dim('    codeck start    — Start Codeck'));
+      console.log(chalk.dim('    codeck open     — Open webapp in browser'));
+      console.log(chalk.dim('    codeck status   — Check container status'));
+      console.log(chalk.dim('    codeck logs     — Stream container logs'));
+      console.log(chalk.dim('    codeck doctor   — Diagnose issues'));
+      console.log();
+    }
   });
