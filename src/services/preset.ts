@@ -262,7 +262,17 @@ async function applyPresetRecursive(presetId: string, visited: Set<string>, dept
       if (force && isDataFile && existsSync(dest)) {
         backupFile(dest);
       }
-      writeFileSync(dest, readFileSync(srcPath, 'utf-8'));
+      let fileContent = readFileSync(srcPath, 'utf-8');
+      // For markdown files: rewrite template placeholders to actual runtime paths.
+      // This allows a single template to work correctly across Docker (/workspace/)
+      // and non-Docker deployments (e.g. /home/codeck/workspace/).
+      if (dest.endsWith('.md') && (WORKSPACE !== '/workspace' || home !== '/root')) {
+        fileContent = fileContent
+          .replace(/\/workspace\//g, `${WORKSPACE}/`)
+          .replace(/\/workspace(?=\s|$|['"`,)])/g, WORKSPACE)
+          .replace(/\/root\//g, `${home}/`);
+      }
+      writeFileSync(dest, fileContent);
       console.log(`[Preset]   WRITE ${dest}`);
     }
   }

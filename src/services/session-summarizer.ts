@@ -71,19 +71,24 @@ export function parseTranscriptForSummary(lines: string[], sessionId: string): T
         userInputs.push(trimmed);
       }
     } else if (role === 'output') {
-      // Scan for file paths in output
-      const pathMatches = data.match(/\/workspace\/[^\s'",)}\]>]+/g);
-      if (pathMatches) {
-        for (const p of pathMatches) {
-          // Clean trailing punctuation
-          const clean = p.replace(/[.:;,!?]+$/, '');
-          filePathsSet.add(clean);
-        }
+      // Strip ANSI escape sequences and carriage returns before scanning
+      const clean = data
+        .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') // ANSI CSI sequences
+        .replace(/\x1b\][^\x07]*\x07/g, '')     // OSC sequences
+        .replace(/\x1b./g, '')                   // Other escapes
+        .replace(/\r/g, ' ');                    // CR → space
+
+      // Scan for file paths — match both /workspace/ (Docker) and real host paths
+      const pathRegex = /(?:\/workspace\/|\/home\/[^/]+\/workspace\/)([^\s'"`,)}\]>&|;=({\[!?]+)/g;
+      let m: RegExpExecArray | null;
+      while ((m = pathRegex.exec(clean)) !== null) {
+        const raw = m[0].replace(/[.:;,!?]+$/, ''); // strip trailing punctuation
+        if (raw.length < 200) filePathsSet.add(raw);
       }
 
       // Count error-like patterns
       const errorPatterns = /\b(error|Error|ERROR|FAIL|fail|panic|exception|Exception)\b/g;
-      const matches = data.match(errorPatterns);
+      const matches = clean.match(errorPatterns);
       if (matches) errorCount += matches.length;
     }
   }
@@ -128,8 +133,16 @@ function buildSummary(digest: TranscriptDigest): string {
   // Files touched
   if (digest.filePaths.length > 0) {
     const shown = digest.filePaths.slice(0, MAX_FILE_PATHS_IN_SUMMARY);
-    const relative = shown.map(p => p.replace(digest.cwd + '/', '').replace('/workspace/', ''));
-    parts.push(`Files: ${relative.map(f => '`' + f + '`').join(', ')}${digest.filePaths.length > MAX_FILE_PATHS_IN_SUMMARY ? ` (+${digest.filePaths.length - MAX_FILE_PATHS_IN_SUMMARY} more)` : ''}`);
+    const relative = shown.map(p =>
+      p.replace(digest.cwd + '/', '')
+       .replace(/^\/home\/[^/]+\/workspace\//, '')
+       .replace(/^\/workspace\//, '')
+    );
+    // Deduplicate and filter out noise (blank, too short, still looks like a command)
+    const clean = [...new Set(relative)].filter(p => p.length > 1 && !/^[&|;]/.test(p));
+    if (clean.length > 0) {
+      parts.push(`Files: ${clean.map(f => '`' + f + '`').join(', ')}${digest.filePaths.length > MAX_FILE_PATHS_IN_SUMMARY ? ` (+${digest.filePaths.length - MAX_FILE_PATHS_IN_SUMMARY} more)` : ''}`);
+    }
   }
 
   // User inputs summary

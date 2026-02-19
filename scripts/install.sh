@@ -170,6 +170,17 @@ chmod 700 "$CODECK_HOME/.codeck" "$CODECK_HOME/.claude" "$CODECK_HOME/.ssh"
 chown -R "$CODECK_USER:$CODECK_USER" "$CODECK_HOME"
 log "Directories ready under $CODECK_HOME"
 
+# Create /workspace symlink so agent memory paths (/workspace/.codeck/...) resolve correctly
+# on non-Docker deployments where the workspace lives at a different absolute path.
+if [ ! -e /workspace ]; then
+  ln -sf "$CODECK_HOME/workspace" /workspace
+  log "/workspace → $CODECK_HOME/workspace symlink created"
+elif [ -L /workspace ]; then
+  log "/workspace symlink already exists ($(readlink /workspace))"
+else
+  log "WARNING: /workspace exists as a non-symlink — skipping (may be Docker volume)"
+fi
+
 # Sudoers: allow codeck user to restart the service and sync files (for self-deploy)
 SUDOERS_FILE="/etc/sudoers.d/codeck"
 cat > "$SUDOERS_FILE" <<'SUDOERS'

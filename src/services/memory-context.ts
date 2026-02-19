@@ -13,7 +13,9 @@ import { search, isSearchAvailable } from './memory-search.js';
 
 const MARKER_START = '<!-- MEMORY_CONTEXT_START -->';
 const MARKER_END = '<!-- MEMORY_CONTEXT_END -->';
-const MAX_CONTEXT_CHARS = 2000;
+const MAX_CONTEXT_CHARS = 5000;
+// Daily logs can get long; only include the most recent portion so stale entries don't crowd out useful context.
+const MAX_DAILY_CHARS = 1500;
 const WORKSPACE_CLAUDE_MD = join(PATHS.WORKSPACE, 'CLAUDE.md');
 
 /**
@@ -40,45 +42,61 @@ export function buildSessionContext(cwd: string): string {
     return true;
   };
 
-  // 1. Today's global daily entries
   const today = new Date().toISOString().slice(0, 10);
-  const todayEntry = getDailyEntry(today);
-  if (todayEntry.content) {
-    addPart(`Today (${today})`, todayEntry.content);
+
+  /** Truncate a daily log to the most recent MAX_DAILY_CHARS characters.
+   *  Daily logs are append-only, so the end is always the most relevant. */
+  const trimDaily = (content: string): string => {
+    if (content.length <= MAX_DAILY_CHARS) return content;
+    // Find a clean entry boundary to avoid cutting mid-entry
+    const truncated = content.slice(-MAX_DAILY_CHARS);
+    const firstNewline = truncated.indexOf('\n');
+    return '...\n' + (firstNewline !== -1 ? truncated.slice(firstNewline + 1) : truncated);
+  };
+
+  // 1. Global durable memory (highest priority — curated long-term knowledge)
+  const globalMemory = getDurableMemory();
+  if (globalMemory.content) {
+    addPart('Durable Memory', globalMemory.content);
   }
 
-  // 2. Yesterday's global daily entries (if today is sparse)
-  if (!todayEntry.content || todayEntry.content.length < 200) {
-    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-    const yesterdayEntry = getDailyEntry(yesterday);
-    if (yesterdayEntry.content) {
-      addPart(`Yesterday (${yesterday})`, yesterdayEntry.content);
-    }
-  }
-
-  // 3. Path-scoped durable memory
+  // 2. Path-scoped durable memory and daily
   try {
     const pathId = resolvePathId(cwd);
+
     const pathMemory = getDurableMemory(pathId);
     if (pathMemory.content) {
       addPart('Project Memory', pathMemory.content);
     }
 
-    // 4. Path-scoped daily entries (skip if identical to global daily)
+    // Path-scoped daily (recent portion only)
     const pathDaily = getDailyEntry(today, pathId);
-    if (pathDaily.content && pathDaily.content !== todayEntry.content) {
-      addPart('Project Today', pathDaily.content);
+    if (pathDaily.content) {
+      addPart('Project Today', trimDaily(pathDaily.content));
     }
   } catch {
     // Path resolution can fail on first use, that's fine
   }
 
-  // 5. FTS search for project name (if search is available)
-  if (totalLen < MAX_CONTEXT_CHARS - 200 && isSearchAvailable()) {
+  // 3. Global daily — recent portion only (auto-summaries can be verbose/noisy)
+  const todayEntry = getDailyEntry(today);
+  if (todayEntry.content) {
+    addPart(`Today (${today})`, trimDaily(todayEntry.content));
+  } else {
+    // Fallback: yesterday when today is empty
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const yesterdayEntry = getDailyEntry(yesterday);
+    if (yesterdayEntry.content) {
+      addPart(`Yesterday (${yesterday})`, trimDaily(yesterdayEntry.content));
+    }
+  }
+
+  // 4. FTS search for project name (if search is available and budget remains)
+  if (totalLen < MAX_CONTEXT_CHARS - 300 && isSearchAvailable()) {
     const projectName = cwd.split('/').pop() || '';
     if (projectName && projectName !== 'workspace') {
       try {
-        const results = search({ query: projectName, limit: 3, scope: ['durable', 'daily', 'decision'] });
+        const results = search({ query: projectName, limit: 3, scope: ['durable', 'decision'] });
         if (results.length > 0) {
           const snippets = results
             .map(r => r.snippet.replace(/<\/?mark>/g, ''))
