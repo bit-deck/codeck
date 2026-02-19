@@ -638,16 +638,15 @@ Authentication with a Claude account to use the CLI.
 
 The implementation handles several edge cases to ensure robust OAuth token management:
 
-- **Auto-Refresh Monitor:** A background interval (`startTokenRefreshMonitor()`) runs every 5 minutes (`TOKEN_CHECK_INTERVAL = 5min`) and checks if the access token expires within the next 30 minutes (`REFRESH_MARGIN = 30min`). If so, it calls `refreshAccessToken()` which POSTs to the Anthropic OAuth token endpoint using the stored `refresh_token`. On success:
-  - `.credentials.json` is updated with the new `access_token`, `refresh_token`, and `expiresAt`
-  - Auth cache is invalidated so subsequent requests use the new token
-  - A `token_refreshed` event is broadcast to connected WebSocket clients
-  - On failure: retries up to 3 times (`MAX_REFRESH_RETRIES`). If all retries fail, a `token_error` event is broadcast.
+- **Auto-Refresh Monitor:** A background interval (`startTokenRefreshMonitor()` in `auth-anthropic.ts`) runs every 5 minutes (`REFRESH_CHECK_INTERVAL_MS = 5min`) and checks if the access token expires within the next 30 minutes (`REFRESH_MARGIN_PROACTIVE_MS = 30min`). If so, it calls `performTokenRefresh()` which POSTs to the Anthropic OAuth token endpoint using the stored `refresh_token`. On success:
+  - `.credentials.json` is updated with the new encrypted `access_token`, `refresh_token`, and `expiresAt`
+  - In-memory token, auth cache, and plaintext cache are all updated
+  - If the token is already expired (e.g., container was suspended), the monitor attempts recovery before giving up
   - The monitor starts during server post-listen initialization and stops cleanly during `gracefulShutdown()` via `stopTokenRefreshMonitor()`.
 
 - **Concurrency Control:** The `refreshInProgress` flag prevents race conditions during concurrent refresh attempts. Only one refresh can execute at a time within a single container. Auth cache (3-second TTL) reduces thundering herd effect when multiple API calls check auth status simultaneously.
 
-- **Revocation Detection:** Token revocation is detected via token use failure (OAuth 2.0 spec does not provide client-side revocation notifications). If the Claude API returns 401 Unauthorized, `markTokenExpired()` is called to invalidate the local cache and force re-authentication.
+- **Revocation Detection:** Token revocation is detected via token use failure (OAuth 2.0 spec does not provide client-side revocation notifications). If the Claude API returns 401 Unauthorized, `markTokenExpired()` is called which: (1) clears the in-memory token and auth cache, (2) attempts a refresh using the stored refresh token, and (3) only deletes credential files if the refresh fails. This preserves recoverability — a 401 from a temporarily invalid access token doesn't destroy the refresh token needed for recovery.
 
 - **PKCE State Cleanup:** PKCE state files (`.pkce-state.json`) have a 5-minute TTL. Stale states are cleaned up on timeout, successful login, error, or startup (if persisted state is loaded and found to be expired).
 
@@ -884,11 +883,13 @@ Terminal data flows through three layers:
 **PTY Output Buffering:**
 - **Pre-attach buffer:** When a session is created but no client is attached, PTY output is buffered up to 1MB in memory (`MAX_BUFFER_SIZE` in `console.ts`). Oldest chunks are dropped (FIFO) if the buffer fills.
 - **Attach & replay:** When a client sends `console:attach`, the server replays all buffered output, then switches to live streaming.
-- **Live streaming:** PTY `onData` events directly call `ws.send()` with no backpressure control. If the client is slow, the WebSocket send buffer will grow in Node.js memory.
+- **Live streaming with backpressure:** PTY `onData` pauses the PTY before each `ws.send()` and resumes it in the send callback. This prevents unbounded buffer growth when the client is slow to consume output.
 
-**Backpressure Handling:** Currently **NOT implemented** for live streaming. If PTY generates data faster than the network can transmit (e.g., `cat large-file.txt` on a slow mobile connection), the server will buffer unbounded data in memory. The `ws` library does not expose `bufferedAmount` reliably (GitHub issue #492), making application-level send queue tracking necessary for production backpressure control.
+**Backpressure Handling:** The PTY is paused before each WebSocket send and **always resumed** in the callback, regardless of whether the send succeeded or failed. This is critical — leaving the PTY paused on a transient send error would permanently freeze the terminal. If the client truly disconnected, the WS `close` event handles cleanup. The `ws` library does not expose `bufferedAmount` reliably (GitHub issue #492), so pause/resume is used instead of queue depth monitoring.
 
-**Known Limitation:** Terminal output may be delayed on slow connections. Users should avoid running commands with unbounded output (e.g., `cat /dev/urandom`). For production deployments requiring backpressure, consider enabling `handleFlowControl` in node-pty (uses XON/XOFF flow control) or implementing application-level send queue monitoring (see AUDIT-123 recommendation 1).
+**Attach Deduplication:** The frontend tracks attached sessions per WS connection via a `Set<string>`. On reconnect, multiple code paths (status sync, session restore, DOM mount) may all try to send `console:attach` — the `attachSession()` helper deduplicates these to prevent handler stacking on the server.
+
+**Known Limitation:** Terminal output may be delayed on slow connections. Users should avoid running commands with unbounded output (e.g., `cat /dev/urandom`). For production deployments requiring finer backpressure, consider enabling `handleFlowControl` in node-pty (uses XON/XOFF flow control).
 
 **Resize Handling:**
 - Client resize messages (`console:resize`) are debounced (50ms desktop, 200ms mobile) via `ResizeObserver` timeout to avoid flooding the server.

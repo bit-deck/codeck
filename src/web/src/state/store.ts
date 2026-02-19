@@ -23,7 +23,7 @@ if (typeof window !== 'undefined') {
 }
 
 export type View = 'loading' | 'auth' | 'setup' | 'preset' | 'main';
-export type Section = 'home' | 'filesystem' | 'claude' | 'agents' | 'integrations' | 'config';
+export type Section = 'home' | 'filesystem' | 'claude' | 'agents' | 'integrations' | 'config' | 'settings';
 export type AuthMode = 'setup' | 'login';
 
 export interface LogEntry {
@@ -66,6 +66,9 @@ export const sessionCount = computed(() => sessions.value.length);
 
 // Connection
 export const wsConnected = signal(false);
+// True while waiting for session restore to complete after a service restart.
+// Keeps the ReconnectOverlay visible until terminals are fully mounted.
+export const restoringPending = signal(false);
 
 // Logs
 export const logs = signal<LogEntry[]>([]);
@@ -99,6 +102,7 @@ export function setActiveSection(s: Section): void { activeSection.value = s; }
 export function setAuthMode(m: AuthMode): void { authMode.value = m; }
 export function setActiveSessionId(id: string | null): void { activeSessionId.value = id; }
 export function setWsConnected(v: boolean): void { wsConnected.value = v; }
+export function setRestoringPending(v: boolean): void { restoringPending.value = v; }
 export function setPresetConfigured(v: boolean): void { presetConfigured.value = v; }
 export function setActivePorts(ports: PortInfo[]): void { activePorts.value = ports; }
 export function setAccountInfo(email: string | null, org: string | null, uuid: string | null): void {
@@ -132,6 +136,9 @@ export function updateStateFromServer(data: Record<string, any>): void {
   }
   if (typeof data.dockerExperimental === 'boolean') {
     dockerExperimental.value = data.dockerExperimental;
+  }
+  if (data.pendingRestore === true) {
+    restoringPending.value = true;
   }
   if (data.sessions) {
     setSessions(data.sessions.map((s: any) => ({

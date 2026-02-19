@@ -13,11 +13,14 @@ interface GitHubStatus {
   loginInProgress: boolean;
   code: string | null;
   url: string | null;
+  username: string | null;
+  email: string | null;
+  avatarUrl: string | null;
 }
 
 export function IntegrationsSection() {
   const [ssh, setSSH] = useState<SSHStatus>({ hasKey: false, publicKey: null, authenticated: false });
-  const [github, setGitHub] = useState<GitHubStatus>({ authenticated: false, loginInProgress: false, code: null, url: null });
+  const [github, setGitHub] = useState<GitHubStatus>({ authenticated: false, loginInProgress: false, code: null, url: null, username: null, email: null, avatarUrl: null });
   const [loading, setLoading] = useState(true);
   const [sshGenerating, setSSHGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -66,6 +69,9 @@ export function IntegrationsSection() {
         loginInProgress: ghData.inProgress || false,
         code: ghData.code || null,
         url: ghData.url || null,
+        username: ghData.username || null,
+        email: ghData.email || null,
+        avatarUrl: ghData.avatarUrl || null,
       });
     } catch {
       setError('Error loading integrations status');
@@ -166,6 +172,9 @@ export function IntegrationsSection() {
           loginInProgress: data.inProgress || false,
           code: data.code || null,
           url: data.url || null,
+          username: data.username || null,
+          email: data.email || null,
+          avatarUrl: data.avatarUrl || null,
         });
         if (!data.inProgress) {
           clearInterval(pollIntervalRef.current!);
@@ -285,7 +294,14 @@ export function IntegrationsSection() {
                 </div>
               </div>
             ) : github.authenticated ? (
-              <p class="integ-card-info">GitHub CLI authenticated. You can clone private repos via HTTPS.</p>
+              <>
+                {github.username && (
+                  <p class="integ-card-info" style={{ fontWeight: 500 }}>
+                    @{github.username}{github.email ? ` · ${github.email}` : ''}
+                  </p>
+                )}
+                <p class="integ-card-info">Clone private repos via HTTPS.</p>
+              </>
             ) : (
               <>
                 <p class="integ-card-info">Connect your GitHub account to access private repos via HTTPS.</p>

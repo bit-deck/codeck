@@ -1,15 +1,16 @@
-import { activeSection, wsConnected, agentName, setActiveSection, type Section } from '../state/store';
-import { IconHome, IconFolder, IconTerminal, IconBot, IconPlug, IconSettings, IconBridge, IconChevronLeft, IconChevronRight } from './Icons';
+import { activeSection, wsConnected, setActiveSection, type Section } from '../state/store';
+import { IconHome, IconFolder, IconTerminal, IconBot, IconPlug, IconSettings, IconShield, IconBrain, IconBridge, IconChevronLeft, IconChevronRight } from './Icons';
+import { NAV_ITEMS } from './nav-items';
 
-const STATIC_NAV_ITEMS: { section: Section; icon: () => preact.JSX.Element; label?: string }[] = [
-  { section: 'home', icon: () => <IconHome size={18} />, label: 'Home' },
-  { section: 'filesystem', icon: () => <IconFolder size={18} />, label: 'Filesystem' },
-  { section: 'claude', icon: () => <IconTerminal size={18} /> },
-
-  { section: 'agents', icon: () => <IconBot size={18} />, label: 'Agents' },
-  { section: 'integrations', icon: () => <IconPlug size={18} />, label: 'Integrations' },
-  { section: 'config', icon: () => <IconSettings size={18} />, label: 'Config' },
-];
+const SECTION_ICONS: Record<Section, () => preact.JSX.Element> = {
+  home: () => <IconHome size={18} />,
+  filesystem: () => <IconFolder size={18} />,
+  claude: () => <IconTerminal size={18} />,
+  agents: () => <IconBot size={18} />,
+  integrations: () => <IconPlug size={18} />,
+  config: () => <IconBrain size={18} />,
+  settings: () => <IconSettings size={18} />,
+};
 
 interface SidebarProps {
   onSectionChange: (section: Section) => void;
@@ -22,9 +23,6 @@ interface SidebarProps {
 export function Sidebar({ onSectionChange, mobileOpen, onClose, collapsed, onToggleCollapse }: SidebarProps) {
   const connected = wsConnected.value;
   const current = activeSection.value;
-  const navItems = STATIC_NAV_ITEMS.map(item =>
-    item.section === 'claude' ? { ...item, label: agentName.value } : { ...item, label: item.label! }
-  );
 
   const sidebarClass = `sidebar${mobileOpen ? ' open' : ''}${collapsed ? ' collapsed' : ''}`;
 
@@ -49,7 +47,7 @@ export function Sidebar({ onSectionChange, mobileOpen, onClose, collapsed, onTog
           )}
         </div>
         <nav class="sidebar-nav" aria-label="Sections">
-          {navItems.map(item => (
+          {NAV_ITEMS.map(item => (
             <button
               key={item.section}
               class={`sidebar-item${current === item.section ? ' active' : ''}`}
@@ -61,7 +59,7 @@ export function Sidebar({ onSectionChange, mobileOpen, onClose, collapsed, onTog
               aria-label={item.label}
               aria-current={current === item.section ? 'page' : undefined}
             >
-              <span class="sidebar-icon" aria-hidden="true">{item.icon()}</span>
+              <span class="sidebar-icon" aria-hidden="true">{SECTION_ICONS[item.section]()}</span>
               {!collapsed && item.label}
             </button>
           ))}

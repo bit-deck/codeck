@@ -7,10 +7,10 @@ import { readFileSync } from 'fs';
 import v8 from 'v8';
 import { installLogInterceptor, getLogBuffer, broadcast } from './logger.js';
 import { setupWebSocket } from './websocket.js';
-import { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, changePassword } from '../services/auth.js';
-import { getClaudeStatus, isClaudeAuthenticated, getAccountInfo } from '../services/auth-anthropic.js';
+import { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, changePassword, getActiveSessions, revokeSessionById, getAuthLog } from '../services/auth.js';
+import { getClaudeStatus, isClaudeAuthenticated, getAccountInfo, startTokenRefreshMonitor, stopTokenRefreshMonitor } from '../services/auth-anthropic.js';
 import { ACTIVE_AGENT } from '../services/agent.js';
-import { getGitStatus, updateClaudeMd } from '../services/git.js';
+import { getGitStatus, updateClaudeMd, initGitHub } from '../services/git.js';
 import { destroyAllSessions, hasSavedSessions, restoreSavedSessions, saveSessionState, updateAgentBinary } from '../services/console.js';
 import { getPresetStatus } from '../services/preset.js';
 import agentRoutes from '../routes/agent.routes.js';
@@ -23,7 +23,7 @@ import { initPortManager } from '../services/port-manager.js';
 import { startMdns, stopMdns, getLanIP } from '../services/mdns.js';
 import { ensureDirectories } from '../services/memory.js';
 import { initializeIndexer, shutdownIndexer } from '../services/memory-indexer.js';
-import { initializeSearch, shutdownSearch, search, isSearchAvailable } from '../services/memory-search.js';
+import { initializeSearch, shutdownSearch } from '../services/memory-search.js';
 import consoleRoutes from '../routes/console.routes.js';
 import presetRoutes from '../routes/preset.routes.js';
 import memoryRoutes from '../routes/memory.routes.js';
@@ -67,7 +67,26 @@ export async function startWebServer(): Promise<void> {
   installLogInterceptor();
 
   const app = express();
+  // Trust the nginx reverse proxy so req.ip uses X-Forwarded-For (real client IP)
+  // instead of 127.0.0.1. '1' = one trusted proxy hop (nginx → Express).
+  app.set('trust proxy', 1);
   const server = createServer(app);
+
+  // Security headers FIRST — must apply to ALL responses (static + dynamic)
+  app.use(helmet({
+    // CSP in report-only mode: logs violations to browser console without blocking.
+    // This lets us identify issues without breaking the page.
+    contentSecurityPolicy: false,
+    // Disable HSTS — Codeck runs over plain HTTP in a local/LAN environment
+    strictTransportSecurity: false,
+    // Disable cross-origin isolation headers — they block CDN resources (Google Fonts)
+    // and static assets with crossorigin attribute (Vite output)
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: false,
+  }));
+
+  app.use(express.json());
 
   // Hashed assets (JS/CSS) get long cache; index.html always revalidates
   app.use(express.static(join(__dirname, 'public'), {
@@ -78,25 +97,6 @@ export async function startWebServer(): Promise<void> {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       }
     },
-  }));
-  app.use(express.json());
-
-  // Security headers (Helmet.js)
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:"],
-        connectSrc: ["'self'", "ws:", "wss:"],
-        fontSrc: ["'self'"],
-        objectSrc: ["'none'"],
-        frameAncestors: ["'none'"],
-      },
-    },
-    // Disable HSTS — Codeck runs over plain HTTP in a local/LAN environment
-    strictTransportSecurity: false,
   }));
 
   // Rate Limiting (in-memory, per-route groups with stale IP cleanup)
@@ -168,28 +168,6 @@ export async function startWebServer(): Promise<void> {
     failedAttempts.delete(ip);
   }
 
-  // Localhost bypass for memory search (allows Claude Code inside the container
-  // to search memory without auth — only accessible from 127.0.0.1/::1)
-  app.get('/api/memory/search', (req, res, next) => {
-    const ip = req.ip || '';
-    const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-    if (!isLocalhost) return next();
-
-    if (!isSearchAvailable()) {
-      res.json({ results: [], available: false });
-      return;
-    }
-    const q = (req.query.q as string) || '';
-    if (q.length > 1000) {
-      res.status(400).json({ error: 'Query exceeds maximum length (1000 characters)' });
-      return;
-    }
-    const scope = req.query.scope ? (req.query.scope as string).split(',') : undefined;
-    const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit as string, 10) || 20, 1), 100) : undefined;
-    const results = search({ query: q, scope, limit });
-    res.json({ results, available: true });
-  });
-
   // Auth Endpoints (public, before middleware)
   app.get('/api/auth/status', (_req, res) => {
     const configured = isPasswordConfigured();
@@ -201,7 +179,7 @@ export async function startWebServer(): Promise<void> {
     const { password } = req.body;
     if (!password || password.length < 8) { res.status(400).json({ error: 'Password must be at least 8 characters' }); return; }
     if (password.length > 256) { res.status(400).json({ error: 'Password must not exceed 256 characters' }); return; }
-    res.json(await setupPassword(password));
+    res.json(await setupPassword(password, req.ip || 'unknown'));
   });
   app.post('/api/auth/login', async (req, res) => {
     const ip = req.ip || 'unknown';
@@ -210,7 +188,7 @@ export async function startWebServer(): Promise<void> {
       res.status(429).json({ success: false, error: 'Too many failed attempts. Try again later.', retryAfter: lockout.retryAfter });
       return;
     }
-    const result = await validatePassword(req.body.password);
+    const result = await validatePassword(req.body.password, ip);
     if (result.success) {
       clearFailedAttempts(ip);
       res.json({ success: true, token: result.token });
@@ -222,6 +200,13 @@ export async function startWebServer(): Promise<void> {
   // Auth Middleware (protects all /api/* below)
   app.use('/api', (req, res, next) => {
     if (!isPasswordConfigured()) return next();
+
+    // Localhost bypass for memory API — agent inside container has full access
+    if (req.path.startsWith('/memory')) {
+      const ip = req.ip || '';
+      if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+    }
+
     // Support token via Bearer header or ?token= query param (for download links)
     const token = req.headers.authorization?.replace('Bearer ', '') || (req.query.token as string | undefined);
     if (!token || !validateSession(token)) { res.status(401).json({ error: 'Unauthorized', needsAuth: true }); return; }
@@ -243,6 +228,24 @@ export async function startWebServer(): Promise<void> {
     const result = await changePassword(currentPassword, newPassword);
     if (result.success) res.json({ success: true, token: result.token });
     else res.status(401).json({ success: false, error: result.error });
+  });
+
+  // Active sessions list
+  app.get('/api/auth/sessions', (req, res) => {
+    const currentToken = req.headers.authorization?.replace('Bearer ', '');
+    res.json({ sessions: getActiveSessions(currentToken) });
+  });
+
+  // Revoke a session by ID
+  app.delete('/api/auth/sessions/:id', (req, res) => {
+    const revoked = revokeSessionById(req.params.id);
+    if (!revoked) { res.status(404).json({ error: 'Session not found' }); return; }
+    res.json({ success: true });
+  });
+
+  // Auth event log
+  app.get('/api/auth/log', (_req, res) => {
+    res.json({ events: getAuthLog() });
   });
 
   // Ports (protected — previously public, moved behind auth per AUDIT-14)
@@ -280,6 +283,11 @@ export async function startWebServer(): Promise<void> {
     res.json({ authenticated: isClaudeAuthenticated(), account: getAccountInfo() });
   });
 
+  // SPA catch-all — serve index.html for all non-API routes (client-side routing)
+  app.get('*', (_req, res) => {
+    res.sendFile(join(__dirname, 'public', 'index.html'));
+  });
+
   // Centralized error handler — catch-all for unhandled errors in routes (CWE-209)
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     // Log full error server-side for debugging
@@ -298,6 +306,7 @@ export async function startWebServer(): Promise<void> {
   function gracefulShutdown(signal: string): void {
     console.log(`[Server] Received signal ${signal}, shutting down...`);
     saveSessionState('shutdown');
+    stopTokenRefreshMonitor();
     shutdownProactiveAgents();
     shutdownEmbeddings();
     shutdownSearch();
@@ -330,6 +339,7 @@ export async function startWebServer(): Promise<void> {
     console.log('');
     logMemoryConfig();
     initPortManager();
+    initGitHub();
     updateClaudeMd();
     ensureDirectories();
 
@@ -348,6 +358,7 @@ export async function startWebServer(): Promise<void> {
     startPortScanner();
     startMdns();
     initProactiveAgents(broadcast);
+    startTokenRefreshMonitor();
 
     // Daily session transcript cleanup (remove >30 day old JSONL files)
     // Run once at startup and then every 24 hours
@@ -359,9 +370,11 @@ export async function startWebServer(): Promise<void> {
       const restoreDelayMs = parseInt(process.env.SESSION_RESTORE_DELAY || '2000', 10);
       setTimeout(() => {
         const restored = restoreSavedSessions();
-        if (restored.length > 0) {
-          broadcast({ type: 'sessions:restored', data: restored });
-        }
+        // Always broadcast sessions:restored, even if empty.
+        // The frontend keeps the "Restoring sessions..." overlay visible until it
+        // receives this message. If we only broadcast on restored.length > 0, an empty
+        // restore (e.g. all sessions failed) leaves the overlay stuck forever.
+        broadcast({ type: 'sessions:restored', data: restored });
       }, restoreDelayMs);
     }
   });

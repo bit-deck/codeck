@@ -19,6 +19,24 @@
 
 ---
 
+## URL Routing
+
+Lightweight History API routing — no router library. The signal architecture stays as-is; `router.ts` syncs `activeSection` signal with the browser URL.
+
+| URL | Section |
+|-----|---------|
+| `/` | home |
+| `/files` | filesystem |
+| `/terminal` | claude |
+| `/agents` | agents |
+| `/integrations` | integrations |
+| `/config` | config |
+
+- **Deep linking**: Direct URL access (e.g., `/terminal`) loads the correct section on init
+- **Back/forward**: `popstate` listener updates `activeSection` signal
+- **Signal → URL**: `useEffect` in `app.tsx` calls `pushSection()` on section changes
+- **SPA catch-all**: Express serves `index.html` for all non-API GET routes
+
 ## File Structure
 
 ```
@@ -29,6 +47,7 @@ src/web/
 └── src/
     ├── main.tsx            # App bootstrap: render(<App />, #app)
     ├── app.tsx             # Root component, view lifecycle manager
+    ├── router.ts           # URL ↔ section sync (History API, no library)
     ├── api.ts              # Fetch wrapper with auth + 401 handling
     ├── ws.ts               # WebSocket client with auto-reconnect
     ├── terminal.ts         # xterm.js instance manager
@@ -102,7 +121,7 @@ All state lives in `state/store.ts` as Preact signals.
 | Signal | Type | Default | Description |
 |--------|------|---------|-------------|
 | `view` | `View` | `'loading'` | Current view |
-| `activeSection` | `Section` | `'home'` | Active main section (home\|filesystem\|claude\|memory\|agents\|integrations\|config) |
+| `activeSection` | `Section` | `'home'` | Active main section (home\|filesystem\|claude\|agents\|integrations\|config) |
 | `authMode` | `AuthMode` | `'login'` | Auth view mode |
 | `claudeAuthenticated` | `boolean` | `false` | Claude account connected |
 | `accountEmail` | `string` | `''` | User email |
@@ -172,7 +191,7 @@ Step-by-step OAuth flow:
 
 ### `Sidebar.tsx` — Navigation
 
-7 nav items: Home, Filesystem, Claude, Memory, Agents, Integrations, Config — each with SVG icons.
+6 nav items: Home, Filesystem, Terminal, Auto Agents, Integrations, Config — each with SVG icons.
 Shows green/red connection status dot. Version footer (v0.1). Responsive: mobile overlay with backdrop.
 Desktop mode supports collapse/expand with chevron buttons (collapsed width: 56px, full width: 260px).
 
@@ -271,7 +290,7 @@ Reusable modal for user confirmations:
 
 Slide-down navigation menu for mobile:
 - Backdrop overlay with close-on-click
-- Full navigation items list with active state highlighting
+- 6 nav items: Home, Filesystem, Terminal, Auto Agents, Integrations, Config (no Memory item)
 - Connection status indicator at bottom
 - Automatically closes on section selection
 

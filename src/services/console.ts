@@ -1,7 +1,8 @@
 import { spawn as ptySpawn, type IPty } from 'node-pty';
-import { readFileSync, existsSync, readdirSync, mkdirSync, unlinkSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdirSync, unlinkSync, renameSync, statSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { resolve } from 'path';
+import { realpathSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { ACTIVE_AGENT } from './agent.js';
 import { syncToClaudeSettings } from './permissions.js';
@@ -26,9 +27,13 @@ interface ConsoleSession {
   outputBuffer: string[];
   outputBufferSize: number;
   attached: boolean;
+  conversationId?: string;
 }
 
 const sessions = new Map<string, ConsoleSession>();
+// Set to true during destroyAllSessions() to suppress per-session state saves
+// that would overwrite the shutdown snapshot with an empty session list.
+let suppressStateSave = false;
 
 console.log(`[Console] Agent binary resolved: ${getAgentBinaryPath()}`);
 
@@ -38,7 +43,81 @@ console.log(`[Console] Agent binary resolved: ${getAgentBinaryPath()}`);
 interface CreateSessionOptions {
   cwd?: string;
   resume?: boolean;
+  useContinue?: boolean;   // use --continue (resumes most recent conv for cwd, no picker)
   continuationPrompt?: string;
+  conversationId?: string;
+}
+
+/**
+ * Detect the conversation ID for a Claude session by polling the project dir.
+ * - Fresh sessions: wait for a NEW .jsonl file to appear.
+ * - Resume/continue sessions: wait for an EXISTING .jsonl file's mtime to change
+ *   (Claude writes to it when the conversation is resumed).
+ * Runs async (fire-and-forget) — does not block session creation.
+ */
+function detectConversationId(session: ConsoleSession, watchExisting = false): void {
+  const encoded = encodeProjectPath(session.cwd);
+  const projectDir = `${ACTIVE_AGENT.projectsDir}/${encoded}`;
+
+  // Snapshot existing .jsonl files (and their mtimes for resume detection)
+  const existingFiles = new Set<string>();
+  const existingMtimes = new Map<string, number>();
+  try {
+    if (existsSync(projectDir)) {
+      for (const f of readdirSync(projectDir)) {
+        if (!f.endsWith('.jsonl')) continue;
+        existingFiles.add(f);
+        if (watchExisting) {
+          try { existingMtimes.set(f, statSync(`${projectDir}/${f}`).mtimeMs); } catch { /* ignore */ }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Poll (500ms intervals, up to 15s)
+  let attempts = 0;
+  const maxAttempts = 30;
+  const interval = setInterval(() => {
+    attempts++;
+    try {
+      if (!existsSync(projectDir)) {
+        if (attempts >= maxAttempts) clearInterval(interval);
+        return;
+      }
+      const files = readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+
+      let found: string | undefined;
+      if (watchExisting) {
+        // Resume mode: look for a file whose mtime has changed (Claude wrote to it)
+        found = files.find(f => {
+          try {
+            const mtime = statSync(`${projectDir}/${f}`).mtimeMs;
+            return mtime > (existingMtimes.get(f) ?? 0);
+          } catch { return false; }
+        });
+      } else {
+        // Fresh session: look for a brand-new file
+        found = files.find(f => !existingFiles.has(f));
+      }
+
+      if (found) {
+        // Validate the file has real conversation messages (not just metadata like file-history-snapshot)
+        if (!hasRealMessages(`${projectDir}/${found}`)) {
+          // Not a real conversation yet — keep polling
+          return;
+        }
+        session.conversationId = found.replace('.jsonl', '');
+        saveSessionState('conversation_detected');
+        console.log(`[Console] Detected conversation: ${session.conversationId} (${watchExisting ? 'resume' : 'new'})`);
+        clearInterval(interval);
+      } else if (attempts >= maxAttempts) {
+        console.warn(`[Console] Could not detect conversation ID for session ${session.id}`);
+        clearInterval(interval);
+      }
+    } catch {
+      clearInterval(interval);
+    }
+  }, 500);
 }
 
 export function createConsoleSession(options?: string | CreateSessionOptions): ConsoleSession {
@@ -61,9 +140,15 @@ export function createConsoleSession(options?: string | CreateSessionOptions): C
 
   // Build CLI args from launch options
   const args: string[] = [];
-  if (opts.resume) {
-    if (opts.continuationPrompt) {
-      // Auto-restore: use --continue (resumes most recent, no picker) with prompt as -p arg
+  if (opts.useContinue) {
+    // Restore/auto-resume: --continue picks the most recent conversation for this cwd
+    args.push(ACTIVE_AGENT.flags.continue);
+  } else if (opts.resume) {
+    if (opts.conversationId) {
+      // Auto-restore: resume specific conversation (no picker, no prompt needed)
+      args.push(ACTIVE_AGENT.flags.resume, opts.conversationId);
+    } else if (opts.continuationPrompt) {
+      // Legacy: --continue with prompt (resumes most recent)
       args.push(ACTIVE_AGENT.flags.continue, '-p', opts.continuationPrompt);
     } else {
       // User-initiated: use --resume (shows interactive picker)
@@ -99,6 +184,18 @@ export function createConsoleSession(options?: string | CreateSessionOptions): C
   const name = workDir.split('/').pop() || workDir;
   const session: ConsoleSession = { id, type: 'agent', pty, cwd: workDir, name, createdAt: Date.now(), outputBuffer: [], outputBufferSize: 0, attached: false };
 
+  // Set or detect conversation ID for agent sessions
+  if (opts.conversationId) {
+    // Known ID (auto-restore): set directly
+    session.conversationId = opts.conversationId;
+  } else if (opts.useContinue || (opts.resume && !opts.conversationId)) {
+    // --continue or interactive --resume: detect which existing conversation was touched
+    detectConversationId(session, true);
+  } else if (!opts.resume) {
+    // Fresh session: detect the new .jsonl file that Claude creates
+    detectConversationId(session, false);
+  }
+
   // Start session capture for transcript logging
   startSessionCapture(id, workDir);
 
@@ -128,7 +225,7 @@ export function createShellSession(cwd?: string): ConsoleSession {
     throw new Error(`Working directory does not exist: ${workDir}`);
   }
 
-  const finalEnv = { ...buildCleanEnv(), TERM: 'xterm-256color', HOME: '/root' };
+  const finalEnv = { ...buildCleanEnv(), TERM: 'xterm-256color' };
 
   console.log(`[Console] Spawning shell PTY: cwd=${workDir}, sessions=${sessions.size}`);
 
@@ -218,11 +315,13 @@ export function destroySession(id: string): void {
     }
   }, 2000);
 
-  saveSessionState('session_destroyed');
+  if (!suppressStateSave) saveSessionState('session_destroyed');
 }
 
 export function destroyAllSessions(): void {
+  suppressStateSave = true;
   for (const [id] of sessions) destroySession(id);
+  suppressStateSave = false;
 }
 
 export function markSessionAttached(id: string): string[] {
@@ -250,10 +349,53 @@ export function listSessions(): Array<{ id: string; type: string; cwd: string; n
 /**
  * Encode a project path the same way Claude Code does for ~/.claude/projects/.
  * Replaces /, \, :, and spaces with '-'.
+ * Uses realpathSync to dereference symlinks — Claude CLI also resolves symlinks,
+ * so a cwd like /home/codeck/workspace/codeck (→ /opt/codeck) must encode as -opt-codeck.
  */
 function encodeProjectPath(cwd: string): string {
-  const absolute = resolve(cwd);
+  let absolute = resolve(cwd);
+  try { absolute = realpathSync(absolute); } catch { /* path may not exist or resolve */ }
   return absolute.replace(/[/\\: ]/g, '-');
+}
+
+/**
+ * Check if a .jsonl file contains at least one real conversation message (user or assistant type).
+ * Filters out files that only contain metadata entries like file-history-snapshot.
+ */
+function hasRealMessages(filePath: string): boolean {
+  try {
+    const lines = readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+    return lines.some(line => {
+      try {
+        const d = JSON.parse(line);
+        return d.type === 'user' || d.type === 'assistant';
+      } catch { return false; }
+    });
+  } catch { return false; }
+}
+
+/**
+ * Find the most recent valid conversation ID for the given cwd.
+ * "Valid" means the .jsonl file has at least one real user/assistant message.
+ * Returns undefined if no valid conversation is found.
+ */
+function findMostRecentConversation(cwd: string): string | undefined {
+  const encoded = encodeProjectPath(cwd);
+  const projectDir = `${ACTIVE_AGENT.projectsDir}/${encoded}`;
+  try {
+    if (!existsSync(projectDir)) return undefined;
+    const files = readdirSync(projectDir)
+      .filter(f => f.endsWith('.jsonl'))
+      .flatMap(f => {
+        try { return [{ name: f, mtime: statSync(`${projectDir}/${f}`).mtimeMs }]; }
+        catch { return []; }
+      })
+      .sort((a, b) => b.mtime - a.mtime); // most recent first
+    for (const { name } of files) {
+      if (hasRealMessages(`${projectDir}/${name}`)) return name.replace('.jsonl', '');
+    }
+    return undefined;
+  } catch { return undefined; }
 }
 
 /**
@@ -281,6 +423,7 @@ interface SavedSession {
   cwd: string;
   name: string;
   reason: string;
+  conversationId?: string;
   continuationPrompt?: string;
 }
 
@@ -299,16 +442,28 @@ export function saveSessionState(reason: string, continuationPrompt?: string): S
       cwd: session.cwd,
       name: session.name,
       reason,
+      conversationId: session.type === 'agent' ? session.conversationId : undefined,
       continuationPrompt: session.type === 'agent' ? continuationPrompt : undefined,
     });
   }
   const state: SessionsState = { version: 1, savedAt: Date.now(), sessions: saved };
+
+  // If there are no sessions to save, remove the file entirely instead of writing an empty
+  // state. This prevents phantom restore cycles: an empty sessions.json would cause
+  // hasSavedSessions()=true on next startup, leading to a restore with 0 sessions and a
+  // stuck "Restoring sessions..." overlay.
+  if (saved.length === 0) {
+    try { unlinkSync(SESSIONS_STATE_PATH); } catch { /* already gone */ }
+    console.log(`[Console] Removed sessions state (reason: ${reason}): no sessions to persist`);
+    return state;
+  }
+
   const dir = resolve(SESSIONS_STATE_PATH, '..');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-
   atomicWriteFileSync(SESSIONS_STATE_PATH, JSON.stringify(state, null, 2));
 
-  console.log(`[Console] Saved ${saved.length} sessions (reason: ${reason})`);
+  const detail = saved.map(s => `${s.id.slice(0, 8)}(conv:${s.conversationId?.slice(0, 8) || 'none'})`).join(', ');
+  console.log(`[Console] Saved ${saved.length} sessions (reason: ${reason}): ${detail || 'none'}`);
   return state;
 }
 
@@ -333,33 +488,47 @@ export function restoreSavedSessions(): Array<{ id: string; type: string; cwd: s
     return [];
   }
 
+  console.log(`[Console] Restoring ${state.sessions.length} saved sessions...`);
   const restored: Array<{ id: string; type: string; cwd: string; name: string }> = [];
 
   for (const saved of state.sessions) {
+    console.log(`[Console] Restoring session ${saved.id.slice(0, 8)}: type=${saved.type}, cwd=${saved.cwd}, conversationId=${saved.conversationId?.slice(0, 8) || 'none'}`);
     try {
       // Validate saved cwd exists, fallback to /workspace
       const cwd = existsSync(saved.cwd) ? saved.cwd : '/workspace';
       if (saved.type === 'agent') {
-        const session = createConsoleSession({
-          cwd,
-          resume: true,
-          continuationPrompt: saved.continuationPrompt,
-        });
+        let session: ConsoleSession;
+        if (saved.conversationId) {
+          // Best case: we have the exact conversation ID — resume it directly
+          session = createConsoleSession({ cwd, resume: true, conversationId: saved.conversationId });
+        } else {
+          // Fallback: find the most recent valid conversation (with real user/assistant messages)
+          // and resume it by ID.  Avoids --continue which can fail with trust dialogs or if
+          // it can't find the conversation via its own heuristics.
+          const recentConvId = findMostRecentConversation(cwd);
+          if (recentConvId) {
+            console.log(`[Console] Found recent conversation ${recentConvId.slice(0, 8)} for ${saved.id.slice(0, 8)}, resuming`);
+            session = createConsoleSession({ cwd, resume: true, conversationId: recentConvId });
+          } else {
+            console.log(`[Console] No valid conversations for ${saved.id.slice(0, 8)}, starting fresh`);
+            session = createConsoleSession({ cwd });
+          }
+        }
         restored.push({ id: session.id, type: session.type, cwd: session.cwd, name: session.name });
       } else {
         const session = createShellSession(cwd);
         restored.push({ id: session.id, type: session.type, cwd: session.cwd, name: session.name });
       }
     } catch (e) {
-      console.log(`[Console] Failed to restore session ${saved.id}:`, (e as Error).message);
+      console.log(`[Console] Failed to restore session ${saved.id.slice(0, 8)}:`, (e as Error).message);
     }
   }
 
-  // Delete state file after restore to prevent stale accumulation
+  // Rename sessions.json to .bak after restore (keep for debugging, but won't re-trigger on next restart)
   try {
-    unlinkSync(SESSIONS_STATE_PATH);
-  } catch (e) {
-    console.warn('[Console] Failed to delete sessions.json after restore:', (e as Error).message);
+    renameSync(SESSIONS_STATE_PATH, SESSIONS_STATE_PATH + '.bak');
+  } catch {
+    try { unlinkSync(SESSIONS_STATE_PATH); } catch { /* ignore */ }
   }
 
   console.log(`[Console] Restored ${restored.length}/${state.sessions.length} sessions`);

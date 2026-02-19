@@ -262,6 +262,7 @@ The server can also auto-update the Claude CLI at runtime via `POST /api/system/
 | `claude-config` | `/root/.claude` | OAuth credentials, CLAUDE.md, MCP config |
 | `codeck-data` | `/workspace/.codeck` | Codeck data (auth, config, memory, rules, skills) |
 | `ssh-data` | `/root/.ssh` | SSH keys |
+| `gh-config` | `/root/.config/gh` | GitHub CLI OAuth token (persists `gh auth login` across restarts) |
 
 ### Security hardening
 

@@ -11,11 +11,33 @@ const BACKUPS_DIR = join(CODECK_DIR, 'backups');
 // Strict allowlist for preset IDs: alphanumeric, hyphens, underscores only
 const VALID_PRESET_ID = /^[a-zA-Z0-9_-]+$/;
 
+const home = process.env.HOME || '/root';
+const WORKSPACE = process.env.WORKSPACE || '/workspace';
+
 // Allowed destination path prefixes for manifest files
 const ALLOWED_DEST_PREFIXES = [
-  '/workspace/',
-  '/root/.claude/',
+  `${WORKSPACE}/`,
+  `${home}/.claude/`,
+  `${home}/`,
 ];
+
+/**
+ * Rewrite manifest paths from Docker defaults (/root/, /workspace/) to
+ * the actual runtime paths. This allows a single manifest.json to work
+ * across Docker, systemd, and cli-local deployment modes.
+ */
+function rewritePath(p: string): string {
+  if (p.startsWith('/root/')) {
+    return `${home}/${p.slice('/root/'.length)}`;
+  }
+  if (p.startsWith('/workspace/')) {
+    return `${WORKSPACE}/${p.slice('/workspace/'.length)}`;
+  }
+  if (p === '/workspace') {
+    return WORKSPACE;
+  }
+  return p;
+}
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -188,8 +210,9 @@ async function applyPresetRecursive(presetId: string, visited: Set<string>, dept
     await applyPresetRecursive(manifest.extends, visited, depth + 1, force);
   }
 
-  // Create declared directories (validate paths)
-  for (const dir of manifest.directories) {
+  // Create declared directories (validate paths, rewrite for deployment mode)
+  for (const rawDir of manifest.directories) {
+    const dir = rewritePath(rawDir);
     if (!isAllowedDestPath(dir)) {
       console.warn(`[Preset]   BLOCKED: directory "${dir}" outside allowed prefixes`);
       continue;
@@ -203,9 +226,10 @@ async function applyPresetRecursive(presetId: string, visited: Set<string>, dept
   // Copy declared files: read from template source, write to dest
   const presetDir = join(TEMPLATES_DIR, presetId);
   for (const file of manifest.files) {
+    const dest = rewritePath(file.dest);
     // Validate destination path
-    if (!isAllowedDestPath(file.dest)) {
-      console.warn(`[Preset]   BLOCKED: dest path "${file.dest}" outside allowed prefixes`);
+    if (!isAllowedDestPath(dest)) {
+      console.warn(`[Preset]   BLOCKED: dest path "${dest}" outside allowed prefixes`);
       continue;
     }
 
@@ -224,22 +248,22 @@ async function applyPresetRecursive(presetId: string, visited: Set<string>, dept
     }
 
     // Ensure destination directory exists
-    const destDir = dirname(file.dest);
+    const destDir = dirname(dest);
     if (!existsSync(destDir)) {
       mkdirSync(destDir, { recursive: true });
     }
 
     // Write file (don't overwrite user edits for data files, unless force)
-    const isDataFile = file.dest.includes('/memory/') || file.dest.endsWith('preferences.md') || file.dest.includes('/rules/');
-    if (!force && isDataFile && existsSync(file.dest)) {
-      console.log(`[Preset]   KEEP ${file.dest} (user data exists)`);
+    const isDataFile = dest.includes('/memory/') || dest.endsWith('preferences.md') || dest.includes('/rules/');
+    if (!force && isDataFile && existsSync(dest)) {
+      console.log(`[Preset]   KEEP ${dest} (user data exists)`);
     } else {
       // Backup data files before force-overwrite
-      if (force && isDataFile && existsSync(file.dest)) {
-        backupFile(file.dest);
+      if (force && isDataFile && existsSync(dest)) {
+        backupFile(dest);
       }
-      writeFileSync(file.dest, readFileSync(srcPath, 'utf-8'));
-      console.log(`[Preset]   WRITE ${file.dest}`);
+      writeFileSync(dest, readFileSync(srcPath, 'utf-8'));
+      console.log(`[Preset]   WRITE ${dest}`);
     }
   }
 

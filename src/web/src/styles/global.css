@@ -10,8 +10,6 @@ body {
   height: 100dvh; /* Dynamic viewport height — accounts for virtual keyboard on mobile */
   overflow: hidden;
   overscroll-behavior: none;
-  position: fixed;
-  width: 100%;
   line-height: 1.5;
   font-size: 14px;
 }

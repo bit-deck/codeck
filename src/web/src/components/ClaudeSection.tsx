@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile } from '../state/store';
+import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile, restoringPending } from '../state/store';
 import { apiFetch } from '../api';
 import { createTerminal, destroyTerminal, fitTerminal, focusTerminal, writeToTerminal } from '../terminal';
-import { wsSend, setTerminalHandlers } from '../ws';
+import { wsSend, setTerminalHandlers, attachSession } from '../ws';
 import { IconPlus, IconX, IconShell, IconTerminal } from './Icons';
 import { MobileTerminalToolbar } from './MobileTerminalToolbar';
 
@@ -42,7 +42,7 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
     );
   }, []);
 
-  // Mount terminals for restored sessions that don't have DOM elements yet (after F5)
+  // Mount terminals for restored sessions that don't have DOM elements yet (after F5 or restore)
   useEffect(() => {
     const container = instancesRef.current;
     if (!container) return;
@@ -58,9 +58,10 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
 
       const instance = createTerminal(s.id, el);
 
-      wsSend({ type: 'console:attach', sessionId: s.id });
+      attachSession(s.id);
       wsSend({ type: 'console:resize', sessionId: s.id, cols: instance.term.cols, rows: instance.term.rows });
     }
+
   }, [sessionList.length]);
 
   // Toggle visible terminal when active tab changes
@@ -197,7 +198,7 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
           ref={instancesRef}
           onClick={handleTerminalTap}
         >
-          {sessionList.length === 0 && (
+          {sessionList.length === 0 && !restoringPending.value && (
             <div class="claude-empty">
               <div class="claude-empty-icon"><IconTerminal size={48} /></div>
               <div class="claude-empty-title">{agentName.value} CLI Console</div>
@@ -208,6 +209,12 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
             <div class="terminal-loading-overlay">
               <div class="spinner" />
               <div class="terminal-loading-text">Starting session...</div>
+            </div>
+          )}
+          {restoringPending.value && (
+            <div class="terminal-loading-overlay">
+              <div class="spinner" />
+              <div class="terminal-loading-text">Restoring sessions...</div>
             </div>
           )}
         </div>
@@ -248,7 +255,7 @@ export function mountTerminalForSession(sessionId: string, cwd: string, name?: s
 
   setTimeout(() => {
     instance.fitAddon.fit();
-    wsSend({ type: 'console:attach', sessionId });
+    attachSession(sessionId);
     wsSend({ type: 'console:resize', sessionId, cols: instance.term.cols, rows: instance.term.rows });
     instance.term.focus();
   }, 100);

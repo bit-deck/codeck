@@ -26,9 +26,11 @@ import { IntegrationsSection } from './components/IntegrationsSection';
 import { ConfigSection } from './components/ConfigSection';
 
 import { AgentsSection } from './components/AgentsSection';
+import { SettingsSection } from './components/SettingsSection';
 import { MobileMenu } from './components/MobileMenu';
 import { IconBridge } from './components/Icons';
 import { ReconnectOverlay } from './components/ReconnectOverlay';
+import { initRouter, sectionFromUrl, pushSection } from './router';
 
 // ========== Error Boundary ==========
 class ErrorBoundary extends Component<{ children: any }, { hasError: boolean }> {
@@ -94,6 +96,18 @@ export function App() {
     document.body.addEventListener('touchmove', preventPullToRefresh, { passive: false });
     return () => document.body.removeEventListener('touchmove', preventPullToRefresh);
   }, []);
+
+  // Router: init popstate listener
+  useEffect(() => {
+    initRouter();
+  }, []);
+
+  // Router: sync section signal → URL
+  useEffect(() => {
+    if (currentView === 'main') {
+      pushSection(section);
+    }
+  }, [section, currentView]);
 
   // Auto-open login modal when token expires while in main view
   useEffect(() => {
@@ -164,13 +178,12 @@ export function App() {
           setView('preset');
           connectWebSocket();
         } else {
+          // Set section from URL BEFORE view transition so the
+          // section→URL sync effect doesn't overwrite the pathname.
+          setActiveSection(sectionFromUrl());
           setView('main');
           connectWebSocket();
           await restoreSessions();
-          // Auto-switch to Claude tab if there are active sessions
-          if (sessions.value.length > 0) {
-            setActiveSection('claude');
-          }
         }
       } else {
         setView('setup');
@@ -206,6 +219,7 @@ export function App() {
           setView('preset');
           connectWebSocket();
         } else {
+          setActiveSection(sectionFromUrl());
           setView('main');
           connectWebSocket();
           await restoreSessions();
@@ -251,6 +265,7 @@ export function App() {
       setView('preset');
       connectWebSocket();
     } else {
+      setActiveSection(sectionFromUrl());
       setView('main');
       connectWebSocket();
       await restoreSessions();
@@ -264,6 +279,7 @@ export function App() {
   // ========== Preset wizard ==========
   async function handlePresetComplete() {
     setPresetConfigured(true);
+    setActiveSection(sectionFromUrl());
     setView('main');
     await restoreSessions();
   }
@@ -407,6 +423,7 @@ export function App() {
             {section === 'agents' && <AgentsSection />}
             {section === 'integrations' && <IntegrationsSection />}
             {section === 'config' && <ConfigSection />}
+            {section === 'settings' && <SettingsSection />}
           </ErrorBoundary>
         </main>
         <LogsDrawer />

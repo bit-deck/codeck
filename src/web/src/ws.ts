@@ -1,4 +1,4 @@
-import { setWsConnected, updateStateFromServer, addLog, sessions, activeSessionId, addSession, setActiveSessionId, setActivePorts, type LogEntry, removeSession, updateProactiveAgent, appendAgentOutput, setAgentRunning } from './state/store';
+import { setWsConnected, updateStateFromServer, addLog, sessions, activeSessionId, addSession, setActiveSessionId, setActivePorts, setActiveSection, setRestoringPending, type LogEntry, removeSession, updateProactiveAgent, appendAgentOutput, setAgentRunning } from './state/store';
 import { getAuthToken } from './api';
 
 // Known WebSocket message types — reject anything not in this set
@@ -25,9 +25,13 @@ let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let staleCheckTimer: ReturnType<typeof setInterval> | null = null;
 let lastMessageAt = 0;
-let reconnectBackoff = 1000; // Exponential backoff: 1s → 2s → 4s → ... → 30s cap
+let reconnectBackoff = 500; // Exponential backoff: 0.5s → 1s → 2s → ... → 15s cap
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 15;
+
+// Track which sessions have been attached on the current WS connection
+// to prevent duplicate console:attach messages on reconnect.
+const attachedSessions = new Set<string>();
 
 // Buffer the last resize message sent while disconnected so terminal
 // dimensions are correct immediately after reconnection.
@@ -53,6 +57,14 @@ export function wsSend(msg: object): void {
   }
 }
 
+/** Send console:attach only once per session per WS connection.
+ *  Prevents duplicate attach when multiple code paths fire on reconnect. */
+export function attachSession(sessionId: string): void {
+  if (attachedSessions.has(sessionId)) return;
+  attachedSessions.add(sessionId);
+  wsSend({ type: 'console:attach', sessionId });
+}
+
 export function connectWebSocket(): void {
   if (ws && ws.readyState !== WebSocket.CLOSED) return;
 
@@ -64,8 +76,9 @@ export function connectWebSocket(): void {
   ws.onopen = () => {
     setWsConnected(true);
     lastMessageAt = Date.now();
-    reconnectBackoff = 1000; // Reset backoff on successful connection
+    reconnectBackoff = 500; // Reset backoff on successful connection
     reconnectAttempts = 0;
+    attachedSessions.clear(); // New connection — reset attach tracking
     addLog({ type: 'info', message: 'Connected to server', timestamp: Date.now() });
     // Don't re-attach here — wait for the 'status' message which includes
     // the server's current session list. Attaching stale IDs after a
@@ -104,7 +117,7 @@ export function connectWebSocket(): void {
         updateStateFromServer(msg.data);
         // After state sync, re-attach all current sessions
         sessions.value.forEach(s => {
-          wsSend({ type: 'console:attach', sessionId: s.id });
+          attachSession(s.id);
         });
       } else if (msg.type === 'log') {
         if (!isLogEntry(msg.data)) return;
@@ -122,11 +135,17 @@ export function connectWebSocket(): void {
         );
         for (const s of restored) {
           addSession({ id: s.id, type: s.type as 'agent' | 'shell', cwd: s.cwd, name: s.name, createdAt: Date.now() });
-          wsSend({ type: 'console:attach', sessionId: s.id });
+          // Do NOT call attachSession here — the terminal DOM element doesn't exist yet.
+          // ClaudeSection's useEffect handles attachment after it mounts the terminal.
         }
-        if (restored.length > 0 && !activeSessionId.value) {
-          setActiveSessionId(restored[0].id);
+        if (restored.length > 0) {
+          if (!activeSessionId.value) setActiveSessionId(restored[0].id);
+          setActiveSection('claude');
         }
+        // Always clear the overlay immediately — don't wait for ClaudeSection's useEffect.
+        // Delegating to the useEffect is fragile: if it doesn't fire (e.g. section already
+        // mounted, same sessionList.length), the overlay stays stuck forever.
+        setRestoringPending(false);
       } else if (msg.type === 'console:error') {
         // Session not found on server (e.g., after container restart) — remove ghost
         if (typeof msg.sessionId === 'string') {
@@ -164,19 +183,27 @@ export function connectWebSocket(): void {
 
   ws.onclose = () => {
     setWsConnected(false);
+    // If sessions were active, assume they'll need to be restored on reconnect.
+    // Set restoringPending immediately so the overlay shows "Restoring sessions..."
+    // as soon as the WS comes back — eliminating the gap between reconnection
+    // and the server's pendingRestore status message arriving.
+    if (sessions.value.length > 0) {
+      setRestoringPending(true);
+    }
     ws = null;
     if (staleCheckTimer) { clearInterval(staleCheckTimer); staleCheckTimer = null; }
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       addLog({ type: 'error', message: 'Unable to reach server after multiple attempts', timestamp: Date.now() });
+      setRestoringPending(false);
       return; // Stop retrying — user can reload or the overlay shows failure
     }
-    reconnectAttempts++;
 
-    // Jitter: use 50-100% of backoff to spread out reconnection attempts
-    const delay = reconnectBackoff * (0.5 + Math.random() * 0.5);
+    // First attempt: near-instant (50ms). Subsequent attempts: exponential backoff.
+    const delay = reconnectAttempts === 0 ? 50 : reconnectBackoff * (0.5 + Math.random() * 0.5);
+    reconnectAttempts++;
     reconnectTimer = setTimeout(connectWebSocket, delay);
-    reconnectBackoff = Math.min(reconnectBackoff * 2, 30000);
+    reconnectBackoff = Math.min(reconnectBackoff * 2, 15000);
   };
 
   ws.onerror = () => ws?.close();
