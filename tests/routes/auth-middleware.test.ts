@@ -31,7 +31,7 @@ describe('Auth Middleware', () => {
     app.use(express.json());
 
     // Import auth functions dynamically to use test directory
-    const { isPasswordConfigured, setupPassword, validateSession, _resetForTesting } = await import('../../src/services/auth.js');
+    const { isPasswordConfigured, setupPassword, validateSession, _resetForTesting } = await import('../../apps/runtime/src/services/auth.js');
 
     // Reset in-memory auth state to match cleaned-up files
     _resetForTesting();
@@ -260,7 +260,7 @@ describe('Auth Middleware', () => {
       expect(expiredToken).toMatch(/^[a-f0-9]{64}$/); // Verify valid token format
 
       // Dynamically import auth service to access activeSessions
-      const authModule = await import('../../src/services/auth.js');
+      const authModule = await import('../../apps/runtime/src/services/auth.js');
 
       // Access the private activeSessions Map via module's memory
       // We need to manipulate the session's createdAt timestamp to make it expired

@@ -13,10 +13,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import agentRoutes from '../../src/routes/agent.routes.js';
+import agentRoutes from '../../apps/runtime/src/routes/agent.routes.js';
 
 // Mock the dependencies
-vi.mock('../../src/services/auth-anthropic.js', () => ({
+vi.mock('../../apps/runtime/src/services/auth-anthropic.js', () => ({
   getClaudeStatus: vi.fn(() => ({
     installed: true,
     authenticated: false,
@@ -37,7 +37,7 @@ vi.mock('../../src/services/auth-anthropic.js', () => ({
   sendLoginCode: vi.fn(),
 }));
 
-vi.mock('../../src/web/websocket.js', () => ({
+vi.mock('../../apps/runtime/src/web/websocket.js', () => ({
   broadcastStatus: vi.fn(),
 }));
 
@@ -59,7 +59,7 @@ describe('GET /api/claude/login-status - OAuth polling', () => {
   });
 
   it('should return authenticated status when no login is in progress', async () => {
-    const { getLoginState, getClaudeStatus } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState, getClaudeStatus } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock: no login in progress, user is authenticated
     vi.mocked(getLoginState).mockReturnValue({
@@ -96,7 +96,7 @@ describe('GET /api/claude/login-status - OAuth polling', () => {
   });
 
   it('should return in-progress status when login is active with URL', async () => {
-    const { getLoginState, getClaudeStatus } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState, getClaudeStatus } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock: login in progress with URL
     vi.mocked(getLoginState).mockReturnValue({
@@ -136,7 +136,7 @@ describe('GET /api/claude/login-status - OAuth polling', () => {
   });
 
   it('should return in-progress status when login is active but URL not yet generated', async () => {
-    const { getLoginState } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock: login active but URL not ready yet
     vi.mocked(getLoginState).mockReturnValue({
@@ -161,7 +161,7 @@ describe('GET /api/claude/login-status - OAuth polling', () => {
   });
 
   it('should return error state when login fails', async () => {
-    const { getLoginState } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock: login failed
     vi.mocked(getLoginState).mockReturnValue({
@@ -186,7 +186,7 @@ describe('GET /api/claude/login-status - OAuth polling', () => {
   });
 
   it('should not check authenticated status during active login to prevent stale cache', async () => {
-    const { getLoginState, getClaudeStatus } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState, getClaudeStatus } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock: login in progress
     vi.mocked(getLoginState).mockReturnValue({
@@ -207,7 +207,7 @@ describe('GET /api/claude/login-status - OAuth polling', () => {
   });
 
   it('should return unauthenticated status when no login is in progress and user not authenticated', async () => {
-    const { getLoginState, getClaudeStatus } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState, getClaudeStatus } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock: no login in progress, user is NOT authenticated
     vi.mocked(getLoginState).mockReturnValue({

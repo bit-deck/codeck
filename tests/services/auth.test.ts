@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, rmSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
-import { setupPassword, isPasswordConfigured, validatePassword, validateSession, invalidateSession, _resetForTesting } from '../../src/services/auth.js';
+import { setupPassword, isPasswordConfigured, validatePassword, validateSession, invalidateSession, _resetForTesting } from '../../apps/runtime/src/services/auth.js';
 
 // Use default CODECK_DIR (/workspace/.codeck) for testing
 // This is acceptable for tests since we'll clean up properly
@@ -465,7 +465,7 @@ describe('services/auth.ts - validateSession', () => {
     const token = setupResult.token;
 
     // Import validateSession dynamically to ensure it uses the current state
-    const { validateSession } = await import('../../src/services/auth.js');
+    const { validateSession } = await import('../../apps/runtime/src/services/auth.js');
 
     // Act - validate the session token
     const isValid = validateSession(token);
@@ -538,7 +538,7 @@ describe('services/auth.ts - validateSession', () => {
     // the expired session by manipulating the file and testing the next call
 
     // Import validateSession to test
-    const { validateSession } = await import('../../src/services/auth.js');
+    const { validateSession } = await import('../../apps/runtime/src/services/auth.js');
 
     // Act - validate the session token (should fail because createdAt is 8 days old)
     // Note: validateSession reads from the in-memory Map, not the file
@@ -633,7 +633,7 @@ describe('services/auth.ts - invalidateSession', () => {
     const token = setupResult.token;
 
     // Import invalidateSession and validateSession dynamically
-    const { invalidateSession, validateSession } = await import('../../src/services/auth.js');
+    const { invalidateSession, validateSession } = await import('../../apps/runtime/src/services/auth.js');
 
     // Verify session is valid before invalidation
     const isValidBefore = validateSession(token);
@@ -689,7 +689,7 @@ describe('services/auth.ts - changePassword', () => {
 
   it('should verify current password before allowing change', async () => {
     // Arrange - setup password
-    const { changePassword } = await import('../../src/services/auth.js');
+    const { changePassword } = await import('../../apps/runtime/src/services/auth.js');
     const currentPassword = 'current-password-123';
     const newPassword = 'new-password-456';
     const wrongPassword = 'wrong-password-789';
@@ -745,7 +745,7 @@ describe('services/auth.ts - changePassword', () => {
 
   it('should invalidate all existing sessions', async () => {
     // Arrange - setup password and create multiple sessions
-    const { changePassword, validateSession } = await import('../../src/services/auth.js');
+    const { changePassword, validateSession } = await import('../../apps/runtime/src/services/auth.js');
     const password = 'multi-session-test';
     const newPassword = 'new-multi-session-test';
 
@@ -1041,7 +1041,7 @@ describe('services/auth.ts - changePassword', () => {
     expect(setupResult.success).toBe(true);
 
     // Act - attempt to change password with correct current password
-    const { changePassword } = await import('../../src/services/auth.ts');
+    const { changePassword } = await import('../../apps/runtime/src/services/auth.ts');
     const result = await changePassword(currentPassword, newPassword);
 
     // Assert - password change should succeed

@@ -3,7 +3,7 @@ import express from 'express';
 import supertest from 'supertest';
 import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
-import { setupPassword, isPasswordConfigured, _resetForTesting } from '../../src/services/auth.js';
+import { setupPassword, isPasswordConfigured, _resetForTesting } from '../../apps/runtime/src/services/auth.js';
 
 const CODECK_DIR = process.env.CODECK_DIR || '/workspace/.codeck';
 const AUTH_FILE = join(CODECK_DIR, 'auth.json');
@@ -83,7 +83,7 @@ describe('POST /api/auth/login - Rate Limiting', () => {
         });
         return;
       }
-      const { validatePassword } = await import('../../src/services/auth.js');
+      const { validatePassword } = await import('../../apps/runtime/src/services/auth.js');
       const result = await validatePassword(req.body.password);
       if (result.success) {
         clearFailedAttempts(ip);

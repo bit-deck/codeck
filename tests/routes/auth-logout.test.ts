@@ -31,7 +31,7 @@ describe('POST /api/auth/logout', () => {
     app.use(express.json());
 
     // Import auth functions dynamically to use test directory
-    const { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, _resetForTesting } = await import('../../src/services/auth.js');
+    const { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, _resetForTesting } = await import('../../apps/runtime/src/services/auth.js');
 
     // Reset in-memory auth state to match cleaned-up files
     _resetForTesting();

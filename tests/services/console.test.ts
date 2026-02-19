@@ -22,7 +22,7 @@ vi.mock('node-pty', () => ({
 }));
 
 // Mock dependencies
-vi.mock('../../src/services/claude-env.js', () => ({
+vi.mock('../../apps/runtime/src/services/claude-env.js', () => ({
   getValidAgentBinary: vi.fn(() => '/usr/local/bin/claude'),
   resolveAgentBinary: vi.fn(() => '/usr/local/bin/claude'),
   getOAuthEnv: vi.fn(() => ({ CLAUDE_CODE_OAUTH_TOKEN: 'mock-token-12345' })),
@@ -32,30 +32,30 @@ vi.mock('../../src/services/claude-env.js', () => ({
   setAgentBinaryPath: vi.fn(),
 }));
 
-vi.mock('../../src/services/permissions.js', () => ({
+vi.mock('../../apps/runtime/src/services/permissions.js', () => ({
   syncToClaudeSettings: vi.fn(),
 }));
 
-vi.mock('../../src/services/session-writer.js', () => ({
+vi.mock('../../apps/runtime/src/services/session-writer.js', () => ({
   startSessionCapture: vi.fn(),
   captureInput: vi.fn(),
   captureOutput: vi.fn(),
   endSessionCapture: vi.fn(),
 }));
 
-vi.mock('../../src/services/session-summarizer.js', () => ({
+vi.mock('../../apps/runtime/src/services/session-summarizer.js', () => ({
   summarizeSession: vi.fn(),
 }));
 
-vi.mock('../../src/services/memory-context.js', () => ({
+vi.mock('../../apps/runtime/src/services/memory-context.js', () => ({
   injectContextIntoCLAUDEMd: vi.fn(),
 }));
 
-vi.mock('../../src/services/memory.js', () => ({
+vi.mock('../../apps/runtime/src/services/memory.js', () => ({
   atomicWriteFileSync: vi.fn(),
 }));
 
-vi.mock('../../src/services/agent.js', () => ({
+vi.mock('../../apps/runtime/src/services/agent.js', () => ({
   ACTIVE_AGENT: {
     command: 'claude',
     flags: {
@@ -71,7 +71,7 @@ import {
   getSession,
   getSessionCount,
   destroySession,
-} from '../../src/services/console.js';
+} from '../../apps/runtime/src/services/console.js';
 
 const CODECK_DIR = process.env.CODECK_DIR || '/workspace/.codeck';
 const STATE_DIR = join(CODECK_DIR, 'state');
@@ -157,7 +157,7 @@ describe('services/console.ts - Session Management', () => {
 
     it('should ensure onboarding is complete before spawning PTY', async () => {
       // Import the mock to verify it was called
-      const { ensureOnboardingComplete } = await import('../../src/services/claude-env.js');
+      const { ensureOnboardingComplete } = await import('../../apps/runtime/src/services/claude-env.js');
 
       // Act: Create a console session
       createConsoleSession({ cwd: TEST_WORKSPACE });
@@ -169,7 +169,7 @@ describe('services/console.ts - Session Management', () => {
 
     it('should sync permissions to settings.json before spawning PTY', async () => {
       // Import the mock to verify it was called
-      const { syncToClaudeSettings } = await import('../../src/services/permissions.js');
+      const { syncToClaudeSettings } = await import('../../apps/runtime/src/services/permissions.js');
 
       // Act: Create a console session
       createConsoleSession({ cwd: TEST_WORKSPACE });
@@ -181,7 +181,7 @@ describe('services/console.ts - Session Management', () => {
 
     it('should strip sensitive env vars (NODE_ENV, PORT, ANTHROPIC_API_KEY)', async () => {
       // Arrange: Import buildCleanEnv mock to verify it's called
-      const { buildCleanEnv } = await import('../../src/services/claude-env.js');
+      const { buildCleanEnv } = await import('../../apps/runtime/src/services/claude-env.js');
 
       // Reset the mock to track calls
       vi.mocked(buildCleanEnv).mockClear();

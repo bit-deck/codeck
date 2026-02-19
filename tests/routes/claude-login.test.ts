@@ -11,10 +11,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import agentRoutes from '../../src/routes/agent.routes.js';
+import agentRoutes from '../../apps/runtime/src/routes/agent.routes.js';
 
 // Mock the dependencies
-vi.mock('../../src/services/auth-anthropic.js', () => ({
+vi.mock('../../apps/runtime/src/services/auth-anthropic.js', () => ({
   getClaudeStatus: vi.fn(() => ({
     installed: true,
     authenticated: false,
@@ -45,7 +45,7 @@ vi.mock('../../src/services/auth-anthropic.js', () => ({
   sendLoginCode: vi.fn(),
 }));
 
-vi.mock('../../src/web/websocket.js', () => ({
+vi.mock('../../apps/runtime/src/web/websocket.js', () => ({
   broadcastStatus: vi.fn(),
 }));
 
@@ -67,7 +67,7 @@ describe('POST /api/claude/login - PKCE initiation', () => {
   });
 
   it('should initiate OAuth PKCE flow when no login is in progress', async () => {
-    const { getLoginState, startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState, startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock: no login in progress
     vi.mocked(getLoginState).mockReturnValue({
@@ -100,7 +100,7 @@ describe('POST /api/claude/login - PKCE initiation', () => {
   });
 
   it('should return in-progress status when login is already active with URL', async () => {
-    const { getLoginState, startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState, startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock: login already in progress
     vi.mocked(getLoginState).mockReturnValue({
@@ -129,7 +129,7 @@ describe('POST /api/claude/login - PKCE initiation', () => {
   });
 
   it('should return in-progress status when login is active but URL not yet generated', async () => {
-    const { getLoginState, startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState, startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock: login active but URL not ready yet
     vi.mocked(getLoginState).mockReturnValue({
@@ -158,8 +158,8 @@ describe('POST /api/claude/login - PKCE initiation', () => {
   });
 
   it('should call broadcastStatus when onUrl callback is triggered', async () => {
-    const { getLoginState, startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { getLoginState, startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     // Mock: no login in progress
     vi.mocked(getLoginState).mockReturnValue({
@@ -194,8 +194,8 @@ describe('POST /api/claude/login - PKCE initiation', () => {
   });
 
   it('should call broadcastStatus when onSuccess callback is triggered', async () => {
-    const { getLoginState, startClaudeLogin, invalidateAuthCache } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { getLoginState, startClaudeLogin, invalidateAuthCache } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     // Mock: no login in progress
     vi.mocked(getLoginState).mockReturnValue({
@@ -230,8 +230,8 @@ describe('POST /api/claude/login - PKCE initiation', () => {
   });
 
   it('should call broadcastStatus when onError callback is triggered', async () => {
-    const { getLoginState, startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { getLoginState, startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     // Mock: no login in progress
     vi.mocked(getLoginState).mockReturnValue({
