@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { join } from 'node:path';
+import { mkdirSync, existsSync } from 'node:fs';
 import { getConfig, isInitialized, type CodeckMode } from '../lib/config.js';
 import { composeUp } from '../lib/docker.js';
 
@@ -24,12 +25,26 @@ export const startCommand = new Command('start')
     try {
       console.log(chalk.dim(`Starting in ${mode} mode...`));
 
+      // In managed mode, create a shared data directory on the host
+      // so daemon and runtime container share auth.json, sessions, etc.
+      let sharedDataDir: string | undefined;
+      if (mode === 'managed') {
+        sharedDataDir = join(config.projectPath, '.codeck-data');
+        if (!existsSync(sharedDataDir)) {
+          mkdirSync(sharedDataDir, { recursive: true });
+        }
+      }
+
       // Start the runtime container
       await composeUp({
         projectPath: config.projectPath,
         lanMode: config.lanMode,
         mode,
         build: mode === 'managed',
+        env: sharedDataDir ? {
+          // Pass to compose so the bind-mount resolves to the host path
+          CODECK_DATA_DIR: sharedDataDir,
+        } : undefined,
       });
 
       if (mode === 'managed') {
@@ -50,6 +65,8 @@ export const startCommand = new Command('start')
             CODECK_RUNTIME_WS_URL: 'http://127.0.0.1:7778',
             CODECK_PROJECT_DIR: config.projectPath,
             CODECK_COMPOSE_FILE: 'docker/compose.managed.yml',
+            // Daemon reads auth.json from the shared data dir
+            CODECK_DIR: sharedDataDir!,
             NODE_ENV: 'production',
           },
         });

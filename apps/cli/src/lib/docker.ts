@@ -15,6 +15,7 @@ interface ComposeOpts {
   projectPath: string;
   lanMode?: CodeckConfig['lanMode'];
   mode?: CodeckMode;
+  env?: Record<string, string>;
 }
 
 /**
@@ -61,7 +62,7 @@ function composeExecOpts(projectPath: string): ExecaOptions {
   return { cwd: resolve(projectPath) };
 }
 
-export async function composeUp(opts: ComposeOpts & { build?: boolean }): Promise<void> {
+export async function composeUp(opts: ComposeOpts & { build?: boolean; env?: Record<string, string> }): Promise<void> {
   const args = ['compose', ...composeFiles(opts), 'up', '-d'];
   if (opts.build) {
     args.push('--build');
@@ -70,6 +71,7 @@ export async function composeUp(opts: ComposeOpts & { build?: boolean }): Promis
     ...composeExecOpts(opts.projectPath),
     stdio: 'inherit',
     timeout: TIMEOUT.UP,
+    env: opts.env ? { ...process.env, ...opts.env } : undefined,
   });
 }
 

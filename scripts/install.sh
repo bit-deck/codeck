@@ -99,7 +99,7 @@ echo -e "${YELLOW}│    • Daemon runs on the host (serves web UI on port 80) 
 echo -e "${YELLOW}│    • Runtime runs in a Docker container (sandboxed)      │${NC}"
 echo -e "${YELLOW}│                                                           │${NC}"
 echo -e "${YELLOW}│  The agent (Claude Code) runs inside the container with  │${NC}"
-echo -e "${YELLOW}│  access to the workspace directory and Docker socket.    │${NC}"
+echo -e "${YELLOW}│  access to the workspace directory (no Docker socket).   │${NC}"
 echo -e "${YELLOW}│                                                           │${NC}"
 echo -e "${YELLOW}│  Recommended: run on a dedicated VPS, not your personal  │${NC}"
 echo -e "${YELLOW}│  workstation. For local use, prefer Docker mode instead.  │${NC}"
@@ -319,11 +319,13 @@ Environment="NODE_ENV=production"
 Environment="CODECK_DAEMON_PORT=80"
 Environment="CODECK_RUNTIME_URL=http://127.0.0.1:7777"
 Environment="CODECK_RUNTIME_WS_URL=http://127.0.0.1:7778"
-Environment="CODECK_DIR=/workspace/.codeck"
+Environment="CODECK_DIR=/opt/codeck/.codeck-data"
+Environment="CODECK_DATA_DIR=/opt/codeck/.codeck-data"
 Environment="CODECK_PROJECT_DIR=/opt/codeck"
 Environment="CODECK_COMPOSE_FILE=docker/compose.managed.yml"
 Environment="HOME=/home/codeck"
 
+ExecStartPre=/usr/bin/mkdir -p /opt/codeck/.codeck-data
 ExecStartPre=/usr/bin/docker compose -f /opt/codeck/docker/compose.managed.yml up -d --wait
 ExecStart=/usr/bin/node /opt/codeck/apps/daemon/dist/index.js
 ExecStopPost=/usr/bin/docker compose -f /opt/codeck/docker/compose.managed.yml down
