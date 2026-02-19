@@ -67,6 +67,9 @@ export async function startWebServer(): Promise<void> {
   installLogInterceptor();
 
   const app = express();
+  // Trust the nginx reverse proxy so req.ip uses X-Forwarded-For (real client IP)
+  // instead of 127.0.0.1. '1' = one trusted proxy hop (nginx → Express).
+  app.set('trust proxy', 1);
   const server = createServer(app);
 
   // Security headers FIRST — must apply to ALL responses (static + dynamic)
