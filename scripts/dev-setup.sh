@@ -2,19 +2,21 @@
 set -euo pipefail
 
 # Codeck Development Setup
-# For developers who clone the repo and run directly from it.
+# Installs everything from scratch on a fresh VPS and runs Codeck
+# directly from the cloned repo. No copies, no syncing.
 #
-# Prerequisites: clone the repo first, then run this from inside it:
-#   git clone https://github.com/cyphercr0w/codeck.git /opt/codeck
-#   cd /opt/codeck
+# Usage (from any directory):
+#   curl -fsSL https://raw.githubusercontent.com/cyphercr0w/codeck/main/scripts/dev-setup.sh | sudo bash
+#
+# Or if you already have the repo:
 #   sudo bash scripts/dev-setup.sh
 #
-# This installs system dependencies and configures systemd to run
-# Codeck directly from the cloned repo. No copies, no syncing.
 # After code changes: npm run build && sudo systemctl restart codeck
 
 NODE_MAJOR=22
 CODECK_USER="codeck"
+CODECK_REPO="https://github.com/cyphercr0w/codeck.git"
+CODECK_INSTALL_DIR="/opt/codeck"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -27,7 +29,13 @@ warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 error(){ echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 step() { echo -e "\n${CYAN}── $* ──${NC}"; }
 
-CODECK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Determine repo dir: use the script's own location if available,
+# otherwise fall back to the install dir (pipe-from-curl case).
+if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "bash" ]]; then
+  CODECK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+else
+  CODECK_DIR="$CODECK_INSTALL_DIR"
+fi
 
 # ─── Pre-flight ──────────────────────────────────────────────────────
 
@@ -35,10 +43,7 @@ step "Pre-flight"
 
 [[ "$(uname -s)" == "Linux" ]] || error "Linux required"
 [[ "$EUID" -eq 0 ]] || error "Run as root: sudo bash scripts/dev-setup.sh"
-[[ -f "$CODECK_DIR/package.json" ]] || error "Run from inside the codeck repo"
 command -v systemctl &>/dev/null || error "systemd required"
-
-log "Repo at: $CODECK_DIR"
 
 # ─── System deps ─────────────────────────────────────────────────────
 
@@ -47,6 +52,34 @@ step "System dependencies"
 apt-get update -qq
 apt-get install -y -qq curl git build-essential python3 rsync >/dev/null
 log "Done"
+
+# ─── GitHub CLI ───────────────────────────────────────────────────────
+
+step "GitHub CLI (gh)"
+
+if command -v gh &>/dev/null; then
+  log "Already installed: $(gh --version | head -1)"
+else
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    > /etc/apt/sources.list.d/github-cli.list
+  apt-get update -qq
+  apt-get install -y -qq gh >/dev/null
+  log "Installed: $(gh --version | head -1)"
+fi
+
+# ─── Clone repo (if not already present) ─────────────────────────────
+
+step "Codeck repo"
+
+if [[ -f "$CODECK_DIR/package.json" ]]; then
+  log "Repo already at $CODECK_DIR"
+else
+  log "Cloning into $CODECK_DIR ..."
+  git clone "$CODECK_REPO" "$CODECK_DIR"
+  log "Cloned"
+fi
 
 # ─── Node.js ─────────────────────────────────────────────────────────
 
@@ -110,11 +143,14 @@ done
 chmod 700 "$CODECK_HOME/.codeck" "$CODECK_HOME/.claude" "$CODECK_HOME/.ssh"
 chown -R "$CODECK_USER:$CODECK_USER" "$CODECK_HOME"
 
-# Sudoers for self-deploy (restart service after rebuilds)
+# Sudoers for self-deploy (restart service + file sync)
 cat > /etc/sudoers.d/codeck <<'SUDOERS'
 codeck ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart codeck
 codeck ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop codeck
 codeck ALL=(ALL) NOPASSWD: /usr/bin/systemctl start codeck
+codeck ALL=(ALL) NOPASSWD: /usr/bin/rsync *
+codeck ALL=(ALL) NOPASSWD: /usr/bin/cp *
+codeck ALL=(ALL) NOPASSWD: /usr/bin/chown *
 SUDOERS
 chmod 440 /etc/sudoers.d/codeck
 log "User ready, sudoers configured"
@@ -175,16 +211,38 @@ log "Service started"
 sleep 2
 systemctl is-active --quiet codeck && log "Running!" || warn "Check: journalctl -u codeck -n 30"
 
-# ─── Symlink repo into workspace ──────────────────────────────────────
+# ─── Symlinks ────────────────────────────────────────────────────────
 
+step "Symlinks"
+
+# /workspace → actual workspace dir so agent memory paths resolve correctly
+# on non-Docker deployments (global CLAUDE.md uses /workspace/... paths).
+if [[ ! -e /workspace ]]; then
+  ln -sf "$CODECK_HOME/workspace" /workspace
+  log "/workspace → $CODECK_HOME/workspace"
+elif [[ -L /workspace ]]; then
+  log "/workspace symlink already exists ($(readlink /workspace))"
+else
+  warn "/workspace exists as a real directory — skipping (may be Docker volume)"
+fi
+
+# repo → workspace/codeck so users can develop Codeck from inside the sandbox
 WORKSPACE_LINK="$CODECK_HOME/workspace/codeck"
 if [[ ! -e "$WORKSPACE_LINK" ]]; then
   ln -s "$CODECK_DIR" "$WORKSPACE_LINK"
   chown -h "$CODECK_USER:$CODECK_USER" "$WORKSPACE_LINK"
-  log "Symlinked $CODECK_DIR → $WORKSPACE_LINK"
+  log "$CODECK_DIR → $WORKSPACE_LINK"
 else
-  log "Workspace link already exists: $WORKSPACE_LINK"
+  log "Workspace codeck link already exists"
 fi
+
+# ─── Git identity ────────────────────────────────────────────────────
+
+step "Git identity"
+
+sudo -u "$CODECK_USER" git config --global user.name "Codeck"
+sudo -u "$CODECK_USER" git config --global user.email "261683274+cyphercr0w@users.noreply.github.com"
+log "git user.name=Codeck"
 
 # ─── Firewall ────────────────────────────────────────────────────────
 
