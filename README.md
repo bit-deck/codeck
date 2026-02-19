@@ -6,26 +6,8 @@ A persistent environment for Claude Code — always-on workspace, memory across 
 
 Give the agent its own machine. Let it live there.
 
----
 
 ## Deploy
-
-### Linux VPS — systemd service
-
-The agent runs as a systemd service directly on the host. One command, no Docker required.
-
-> **Warning:** This mode runs without container isolation. The agent has full access to the host filesystem and can run arbitrary commands as the `codeck` system user. Use a dedicated machine or VPS — never your personal workstation.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cyphercr0w/codeck/main/scripts/install.sh | sudo bash
-```
-
-Installs Node.js, Claude Code CLI, creates a `codeck` user, and starts the service on port 80.
-
-```bash
-systemctl status codeck
-journalctl -u codeck -f
-```
 
 ### Local — Docker (isolated)
 
@@ -45,7 +27,24 @@ codeck open
 
 `codeck init` detects your OS, lets you choose deployment mode (systemd or Docker on Linux), builds the base image, and starts the container. Re-running is safe — never destroys volumes.
 
----
+### Linux VPS — systemd service
+
+The agent runs as a systemd service directly on the host. One command, no Docker required.
+
+> **Warning:** This mode runs without container isolation. The agent has full access to the host filesystem and can run arbitrary commands as the `codeck` system user. Use a dedicated machine or VPS — never your personal workstation.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cyphercr0w/codeck/main/scripts/install.sh | sudo bash
+```
+
+Installs Node.js, Claude Code CLI, creates a `codeck` user, and starts the service on port 80.
+
+```bash
+systemctl status codeck
+journalctl -u codeck -f
+```
+
+
 
 ## What you get
 
@@ -65,7 +64,6 @@ codeck open
 - LAN access — `codeck.local` from any device via mDNS
 - Workspace export as `.tar.gz`
 
----
 
 ## Contributing
 
@@ -77,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/cyphercr0w/codeck/main/scripts/dev-
 
 After changes: `npm run build && sudo systemctl restart codeck`
 
----
+
 
 ## Documentation
 
