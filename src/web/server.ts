@@ -7,7 +7,7 @@ import { readFileSync } from 'fs';
 import v8 from 'v8';
 import { installLogInterceptor, getLogBuffer, broadcast } from './logger.js';
 import { setupWebSocket } from './websocket.js';
-import { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, changePassword } from '../services/auth.js';
+import { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, changePassword, getActiveSessions, revokeSessionById, getAuthLog } from '../services/auth.js';
 import { getClaudeStatus, isClaudeAuthenticated, getAccountInfo, startTokenRefreshMonitor, stopTokenRefreshMonitor } from '../services/auth-anthropic.js';
 import { ACTIVE_AGENT } from '../services/agent.js';
 import { getGitStatus, updateClaudeMd, initGitHub } from '../services/git.js';
@@ -176,7 +176,7 @@ export async function startWebServer(): Promise<void> {
     const { password } = req.body;
     if (!password || password.length < 8) { res.status(400).json({ error: 'Password must be at least 8 characters' }); return; }
     if (password.length > 256) { res.status(400).json({ error: 'Password must not exceed 256 characters' }); return; }
-    res.json(await setupPassword(password));
+    res.json(await setupPassword(password, req.ip || 'unknown'));
   });
   app.post('/api/auth/login', async (req, res) => {
     const ip = req.ip || 'unknown';
@@ -185,7 +185,7 @@ export async function startWebServer(): Promise<void> {
       res.status(429).json({ success: false, error: 'Too many failed attempts. Try again later.', retryAfter: lockout.retryAfter });
       return;
     }
-    const result = await validatePassword(req.body.password);
+    const result = await validatePassword(req.body.password, ip);
     if (result.success) {
       clearFailedAttempts(ip);
       res.json({ success: true, token: result.token });
@@ -225,6 +225,24 @@ export async function startWebServer(): Promise<void> {
     const result = await changePassword(currentPassword, newPassword);
     if (result.success) res.json({ success: true, token: result.token });
     else res.status(401).json({ success: false, error: result.error });
+  });
+
+  // Active sessions list
+  app.get('/api/auth/sessions', (req, res) => {
+    const currentToken = req.headers.authorization?.replace('Bearer ', '');
+    res.json({ sessions: getActiveSessions(currentToken) });
+  });
+
+  // Revoke a session by ID
+  app.delete('/api/auth/sessions/:id', (req, res) => {
+    const revoked = revokeSessionById(req.params.id);
+    if (!revoked) { res.status(404).json({ error: 'Session not found' }); return; }
+    res.json({ success: true });
+  });
+
+  // Auth event log
+  app.get('/api/auth/log', (_req, res) => {
+    res.json({ events: getAuthLog() });
   });
 
   // Ports (protected — previously public, moved behind auth per AUDIT-14)

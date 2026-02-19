@@ -1,5 +1,5 @@
 import { activeSection, wsConnected, setActiveSection, type Section } from '../state/store';
-import { IconHome, IconFolder, IconTerminal, IconBot, IconPlug, IconSettings, IconBridge, IconChevronLeft, IconChevronRight } from './Icons';
+import { IconHome, IconFolder, IconTerminal, IconBot, IconPlug, IconSettings, IconShield, IconBridge, IconChevronLeft, IconChevronRight } from './Icons';
 import { NAV_ITEMS } from './nav-items';
 
 const SECTION_ICONS: Record<Section, () => preact.JSX.Element> = {
@@ -9,6 +9,7 @@ const SECTION_ICONS: Record<Section, () => preact.JSX.Element> = {
   agents: () => <IconBot size={18} />,
   integrations: () => <IconPlug size={18} />,
   config: () => <IconSettings size={18} />,
+  settings: () => <IconShield size={18} />,
 };
 
 interface SidebarProps {

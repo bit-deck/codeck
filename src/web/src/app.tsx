@@ -26,6 +26,7 @@ import { IntegrationsSection } from './components/IntegrationsSection';
 import { ConfigSection } from './components/ConfigSection';
 
 import { AgentsSection } from './components/AgentsSection';
+import { SettingsSection } from './components/SettingsSection';
 import { MobileMenu } from './components/MobileMenu';
 import { IconBridge } from './components/Icons';
 import { ReconnectOverlay } from './components/ReconnectOverlay';
@@ -422,6 +423,7 @@ export function App() {
             {section === 'agents' && <AgentsSection />}
             {section === 'integrations' && <IntegrationsSection />}
             {section === 'config' && <ConfigSection />}
+            {section === 'settings' && <SettingsSection />}
           </ErrorBoundary>
         </main>
         <LogsDrawer />

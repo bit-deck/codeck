@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, mkdirSync, copyFileSync, rmSync } from 'fs';
-import { scrypt, createHash, randomBytes, timingSafeEqual, ScryptOptions } from 'crypto';
+import { scrypt, createHash, randomBytes, randomUUID, timingSafeEqual, ScryptOptions } from 'crypto';
 import { join, dirname } from 'path';
 import { atomicWriteFileSync } from './memory.js';
 import { ACTIVE_AGENT } from './agent.js';
@@ -94,13 +94,20 @@ memoryAuthConfig = loadAuthFromDisk();
 
 // ============ SESSIONS ============
 
+interface SessionData {
+  id: string;        // UUID — used by the API for revocation (never expose token)
+  createdAt: number;
+  ip: string;
+}
+
 const SESSIONS_FILE = join(CODECK_DIR, 'sessions.json');
-const activeSessions = new Map<string, { createdAt: number }>();
+const activeSessions = new Map<string, SessionData>(); // token → data
+const sessionById   = new Map<string, string>();        // id    → token (for O(1) revoke)
 const SESSION_TTL = parseInt(process.env.SESSION_TTL_MS || '604800000', 10); // default 7 days
 
 function saveSessions(): void {
   try {
-    const data: Record<string, { createdAt: number }> = {};
+    const data: Record<string, SessionData> = {};
     for (const [token, session] of activeSessions) {
       data[token] = session;
     }
@@ -116,11 +123,17 @@ function saveSessions(): void {
 function loadSessions(): void {
   try {
     if (!existsSync(SESSIONS_FILE)) return;
-    const data: Record<string, { createdAt: number }> = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
+    const data: Record<string, any> = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
     const now = Date.now();
     for (const [token, session] of Object.entries(data)) {
       if (now - session.createdAt <= SESSION_TTL) {
-        activeSessions.set(token, session);
+        const sessionData: SessionData = {
+          id: session.id || randomUUID(),
+          createdAt: session.createdAt,
+          ip: session.ip || 'unknown',
+        };
+        activeSessions.set(token, sessionData);
+        sessionById.set(sessionData.id, token);
       }
     }
   } catch {
@@ -130,6 +143,22 @@ function loadSessions(): void {
 
 // Load persisted sessions on startup
 loadSessions();
+
+// ============ AUTH EVENT LOG ============
+
+export interface AuthLogEntry {
+  type: 'login_success' | 'login_failure';
+  ip: string;
+  timestamp: number;
+}
+
+const authLog: AuthLogEntry[] = [];
+const MAX_AUTH_LOG = 200;
+
+function logAuthEvent(type: AuthLogEntry['type'], ip: string): void {
+  authLog.push({ type, ip, timestamp: Date.now() });
+  if (authLog.length > MAX_AUTH_LOG) authLog.shift();
+}
 
 // ============ AUTH CONFIG ============
 
@@ -194,7 +223,7 @@ export function _resetForTesting(): void {
   memoryAuthConfig = loadAuthFromDisk();
 }
 
-export async function setupPassword(password: string): Promise<{ success: boolean; token: string }> {
+export async function setupPassword(password: string, ip = 'unknown'): Promise<{ success: boolean; token: string }> {
   const salt = randomBytes(32).toString('hex');
   const config: AuthConfig = {
     passwordHash: await hashPassword(password, salt),
@@ -207,12 +236,14 @@ export async function setupPassword(password: string): Promise<{ success: boolea
 
   // Create session automatically
   const token = randomBytes(32).toString('hex');
-  activeSessions.set(token, { createdAt: Date.now() });
+  const sessionData: SessionData = { id: randomUUID(), createdAt: Date.now(), ip };
+  activeSessions.set(token, sessionData);
+  sessionById.set(sessionData.id, token);
   saveSessions();
   return { success: true, token };
 }
 
-export async function validatePassword(password: string): Promise<{ success: boolean; token?: string }> {
+export async function validatePassword(password: string, ip = 'unknown'): Promise<{ success: boolean; token?: string }> {
   if (!memoryAuthConfig) return { success: false };
 
   try {
@@ -229,6 +260,7 @@ export async function validatePassword(password: string): Promise<{ success: boo
     const a = Buffer.from(hash, 'hex');
     const b = Buffer.from(config.passwordHash, 'hex');
     if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      logAuthEvent('login_failure', ip);
       return { success: false };
     }
 
@@ -247,8 +279,11 @@ export async function validatePassword(password: string): Promise<{ success: boo
     }
 
     const token = randomBytes(32).toString('hex');
-    activeSessions.set(token, { createdAt: Date.now() });
+    const sessionData: SessionData = { id: randomUUID(), createdAt: Date.now(), ip };
+    activeSessions.set(token, sessionData);
+    sessionById.set(sessionData.id, token);
     saveSessions();
+    logAuthEvent('login_success', ip);
     return { success: true, token };
   } catch {
     return { success: false };
@@ -267,6 +302,8 @@ export function validateSession(token: string): boolean {
 }
 
 export function invalidateSession(token: string): void {
+  const session = activeSessions.get(token);
+  if (session) sessionById.delete(session.id);
   activeSessions.delete(token);
   saveSessions();
 }
@@ -290,13 +327,51 @@ export async function changePassword(currentPassword: string, newPassword: strin
 
   // Invalidate all existing sessions (force re-login)
   activeSessions.clear();
+  sessionById.clear();
   saveSessions();
 
   // Create a new session for the current user
   const token = randomBytes(32).toString('hex');
-  activeSessions.set(token, { createdAt: Date.now() });
+  const sessionData: SessionData = { id: randomUUID(), createdAt: Date.now(), ip: 'unknown' };
+  activeSessions.set(token, sessionData);
+  sessionById.set(sessionData.id, token);
   saveSessions();
 
   console.log('[Auth] Password changed successfully');
   return { success: true, token };
+}
+
+// ============ SESSION / LOG QUERIES ============
+
+export interface SessionInfo {
+  id: string;
+  createdAt: number;
+  ip: string;
+  current: boolean;
+}
+
+export function getActiveSessions(currentToken?: string): SessionInfo[] {
+  const now = Date.now();
+  const results: SessionInfo[] = [];
+  for (const [token, session] of activeSessions) {
+    if (now - session.createdAt > SESSION_TTL) continue;
+    results.push({
+      id: session.id,
+      createdAt: session.createdAt,
+      ip: session.ip,
+      current: token === currentToken,
+    });
+  }
+  return results.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function revokeSessionById(sessionId: string): boolean {
+  const token = sessionById.get(sessionId);
+  if (!token) return false;
+  invalidateSession(token);
+  return true;
+}
+
+export function getAuthLog(): AuthLogEntry[] {
+  return [...authLog];
 }

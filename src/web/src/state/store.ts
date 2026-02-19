@@ -23,7 +23,7 @@ if (typeof window !== 'undefined') {
 }
 
 export type View = 'loading' | 'auth' | 'setup' | 'preset' | 'main';
-export type Section = 'home' | 'filesystem' | 'claude' | 'agents' | 'integrations' | 'config';
+export type Section = 'home' | 'filesystem' | 'claude' | 'agents' | 'integrations' | 'config' | 'settings';
 export type AuthMode = 'setup' | 'login';
 
 export interface LogEntry {

@@ -2992,3 +2992,131 @@
     gap: 0;
   }
 }
+
+/* ========== Settings Section ========== */
+
+.settings-content {
+  padding: 24px 32px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.settings-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.settings-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-form-group {
+  margin-bottom: 14px;
+}
+
+.settings-form-group label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.settings-error {
+  font-size: 13px;
+  color: var(--error, #f87171);
+  margin-bottom: 12px;
+}
+
+.settings-success {
+  font-size: 13px;
+  color: var(--success, #4ade80);
+  margin-bottom: 12px;
+}
+
+.settings-muted {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.settings-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  white-space: nowrap;
+}
+
+.settings-table-wrap {
+  overflow-x: auto;
+}
+
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.settings-table th {
+  text-align: left;
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-table tr:last-child td {
+  border-bottom: none;
+}
+
+.settings-log-ok {
+  color: var(--success, #4ade80);
+  font-weight: 500;
+}
+
+.settings-log-fail {
+  color: var(--error, #f87171);
+  font-weight: 500;
+}
+
+.btn-danger-sm {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid var(--error, #f87171);
+  color: var(--error, #f87171);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+
+.btn-danger-sm:hover:not(:disabled) {
+  background: var(--error, #f87171);
+  color: #fff;
+}
+
+.btn-danger-sm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .settings-content {
+    padding: 16px;
+  }
+}
