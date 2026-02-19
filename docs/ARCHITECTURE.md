@@ -1071,7 +1071,7 @@ Browser: GET http://localhost:3000/
         └── Container service on 0.0.0.0:3000
 ```
 
-**Default mapping:** Only the Codeck port (default 80) is mapped. Additional ports are added on demand via the dashboard UI, the `POST /api/system/add-port` API, or manually in `compose.override.yml` (see `compose.override.yml.example`). The Codeck CLI `init` wizard can also pre-map ports during setup.
+**Default mapping:** Only the Codeck port (default 80) is mapped. Additional ports are added on demand via the dashboard UI, the `POST /api/system/add-port` API, or manually in `docker/compose.override.yml`. The Codeck CLI `init` wizard can also pre-map ports during setup.
 
 ### Port manager (port-manager.ts)
 
@@ -1388,20 +1388,18 @@ docker/Dockerfile.base (build once)
     │  + init-keyring.sh
     │
     ▼
-docker/Dockerfile (production)       docker/Dockerfile.dev (development)
-    │                                    │
-    │  FROM codeck-base:latest         │  FROM codeck-base:latest AS builder
-    │  COPY package.json                 │  COPY . .
-    │  npm install --ignore-scripts      │  npm install
-    │  cp /prebuilt/node-pty →           │  npm run build
-    │    node_modules/                   │
-    │  COPY dist/ (pre-built)            │  FROM codeck-base:latest
-    │  COPY templates/                   │  COPY --from=builder dist/
-    │                                    │  COPY --from=builder node_modules/
-    │                                    │
-    │  ENTRYPOINT [init-keyring.sh,      │  ENTRYPOINT [init-keyring.sh,
-    │    node, dist/index.js]            │    node, dist/index.js]
-    │  CMD [--web]                       │  CMD [--web]
+docker/Dockerfile (production)
+    │
+    │  FROM codeck-base:latest
+    │  COPY package.json
+    │  npm install --ignore-scripts
+    │  cp /prebuilt/node-pty → node_modules/
+    │  COPY dist/ (pre-built on host)
+    │  COPY templates/
+    │
+    │  ENTRYPOINT [init-keyring.sh,
+    │    node, dist/index.js]
+    │  CMD [--web]
 ```
 
 **Why a separate base image:**

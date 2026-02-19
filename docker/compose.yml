@@ -1,14 +1,13 @@
-# Codeck
+# Codeck — Local Mode
+#
+# Single container running the runtime with the webapp.
+# For local development, self-hosting, and LAN access.
 #
 # Usage:
-#   docker compose -f docker/compose.yml up
-#   docker compose -f docker/compose.yml run --rm sandbox --help
+#   docker compose -f docker/compose.yml up --build
 #
-# LAN access (codeck.local from any device):
+# With LAN access (codeck.local from any device):
 #   docker compose -f docker/compose.yml -f docker/compose.lan.yml up
-#
-# Dev (build from source):
-#   docker compose -f docker/compose.yml -f docker/compose.dev.yml up --build
 
 services:
   sandbox:

@@ -6,8 +6,7 @@ import { getContainerStatus } from '../lib/detect.js';
 
 export const restartCommand = new Command('restart')
   .description('Restart the Codeck container(s)')
-  .option('--dev', 'Restart in development mode')
-  .action(async (opts) => {
+  .action(async () => {
     if (!isInitialized()) {
       console.log(chalk.red('Codeck not initialized. Run `codeck init` first.'));
       process.exit(1);
@@ -32,14 +31,13 @@ export const restartCommand = new Command('restart')
         await new Promise(r => setTimeout(r, 1000));
       }
 
-      const label = config.mode === 'gateway' ? 'gateway mode' : (opts.dev ? 'dev mode' : 'local mode');
+      const label = config.mode === 'gateway' ? 'gateway mode' : 'local mode';
       console.log(chalk.dim(`Starting in ${label}...`));
       await composeUp({
         projectPath: config.projectPath,
         lanMode: config.lanMode,
         mode: config.mode,
-        dev: config.mode === 'local' ? opts.dev : false,
-        build: config.mode === 'local' ? opts.dev : true,
+        build: config.mode === 'gateway',
       });
 
       console.log();

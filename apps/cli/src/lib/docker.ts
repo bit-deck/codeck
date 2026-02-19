@@ -15,7 +15,6 @@ interface ComposeOpts {
   projectPath: string;
   lanMode?: CodeckConfig['lanMode'];
   mode?: CodeckMode;
-  dev?: boolean;
 }
 
 /**
@@ -45,13 +44,10 @@ function validateProjectPath(projectPath: string): void {
 
 function composeFiles(opts: ComposeOpts): string[] {
   if (opts.mode === 'gateway') {
-    // Gateway mode uses its own compose file — no dev/LAN overlays
+    // Gateway mode uses its own compose file — no LAN overlay
     return ['-f', 'docker/compose.gateway.yml'];
   }
   const files = ['-f', 'docker/compose.yml'];
-  if (opts.dev) {
-    files.push('-f', 'docker/compose.dev.yml');
-  }
   if (opts.lanMode === 'host') {
     files.push('-f', 'docker/compose.lan.yml');
   }
@@ -65,7 +61,7 @@ function composeExecOpts(projectPath: string): ExecaOptions {
 
 export async function composeUp(opts: ComposeOpts & { build?: boolean }): Promise<void> {
   const args = ['compose', ...composeFiles(opts), 'up', '-d'];
-  if (opts.build || opts.dev) {
+  if (opts.build) {
     args.push('--build');
   }
   await execa('docker', args, {
@@ -93,7 +89,7 @@ export async function composeLogs(opts: ComposeOpts & { lines?: number }): Promi
 }
 
 export async function buildBaseImage(projectPath: string): Promise<void> {
-  await execa('docker', ['build', '-t', 'codeck-base', '-f', 'Dockerfile.base', '.'], {
+  await execa('docker', ['build', '-t', 'codeck-base', '-f', 'docker/Dockerfile.base', '.'], {
     cwd: projectPath,
     stdio: 'inherit',
     timeout: TIMEOUT.BUILD,

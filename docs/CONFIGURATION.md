@@ -175,21 +175,19 @@ Build the base image first (one-time):
 docker build -t codeck-base -f docker/Dockerfile.base .
 ```
 
-### Production
+### Local mode
 
 Requires pre-built `dist/` directory:
 
 ```bash
-npm run build                    # Build frontend + backend
-docker compose -f docker/compose.yml up --build   # Uses docker/Dockerfile (production)
+npm run build                                       # Build frontend + backend
+docker compose -f docker/compose.yml up --build     # Single container (runtime + webapp)
 ```
 
-### Development
-
-Builds from source inside the container:
+### Gateway mode
 
 ```bash
-docker compose -f docker/compose.yml -f docker/compose.dev.yml up --build
+docker compose -f docker/compose.gateway.yml up --build   # Daemon + runtime containers
 ```
 
 ### Image layers
@@ -207,11 +205,6 @@ codeck (production, ~200MB on top of base)
 ├── Pre-built node-pty copied from /prebuilt/
 ├── dist/ (pre-built on host)
 └── apps/runtime/src/templates/
-
-codeck-dev (development, ~300MB on top of base)
-├── npm install (all deps including Vite, TypeScript)
-├── npm run build (inside container)
-└── Same runtime config as production
 ```
 
 ### Base Image Security
@@ -667,7 +660,7 @@ Active ports are detected by scanning listening sockets every 5 seconds and broa
 
 ### Custom port ranges
 
-Copy `compose.override.yml.example` to `compose.override.yml` and customize. Docker Compose auto-loads override files without extra `-f` flags. The auto-restart mechanism will also update this file when ports are added via the UI/API.
+Create a `docker/compose.override.yml` with extra port mappings. The auto-restart mechanism will also update this file when ports are added via the UI/API.
 
 ---
 

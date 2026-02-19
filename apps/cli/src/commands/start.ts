@@ -5,7 +5,6 @@ import { composeUp } from '../lib/docker.js';
 
 export const startCommand = new Command('start')
   .description('Start the Codeck container(s)')
-  .option('--dev', 'Start in development mode (build from source)')
   .option('--mode <mode>', 'Override mode: local or gateway')
   .action(async (opts) => {
     if (!isInitialized()) {
@@ -22,14 +21,13 @@ export const startCommand = new Command('start')
     }
 
     try {
-      const label = mode === 'gateway' ? 'gateway mode' : (opts.dev ? 'dev mode' : 'local mode');
+      const label = mode === 'gateway' ? 'gateway mode' : 'local mode';
       console.log(chalk.dim(`Starting in ${label}...`));
       await composeUp({
         projectPath: config.projectPath,
         lanMode: config.lanMode,
         mode,
-        dev: mode === 'local' ? opts.dev : false,
-        build: mode === 'local' ? opts.dev : true,
+        build: mode === 'gateway',
       });
 
       console.log();
