@@ -46,7 +46,7 @@ router.post('/', (req, res) => {
   try {
     const { name, objective, schedule, cwd, model, timeoutMs, maxRetries } = req.body || {};
     if (cwd && !isValidCwd(cwd)) {
-      res.status(400).json({ error: 'Working directory must be within /workspace' });
+      res.status(400).json({ error: `Working directory must be within ${WORKSPACE}` });
       return;
     }
     const warnings = objective ? lintAgentObjective(objective) : [];
@@ -76,7 +76,7 @@ router.put('/:id', (req, res) => {
   try {
     const body = req.body || {};
     if (body.cwd && !isValidCwd(body.cwd)) {
-      res.status(400).json({ error: 'Working directory must be within /workspace' });
+      res.status(400).json({ error: `Working directory must be within ${WORKSPACE}` });
       return;
     }
     const agent = updateAgent(req.params.id, body);

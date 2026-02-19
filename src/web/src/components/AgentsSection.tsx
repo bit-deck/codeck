@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { apiFetch } from '../api';
 import {
-  proactiveAgents, agentOutputs, setProactiveAgents,
+  proactiveAgents, agentOutputs, workspacePath, setProactiveAgents,
   removeProactiveAgent, clearAgentOutput, appendAgentOutput,
   type ProactiveAgent,
 } from '../state/store';
@@ -92,18 +92,20 @@ function DirSelector({ value, onChange }: {
   onChange: (path: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  // relativePath is what we send to the API (relative to /workspace)
+  // relativePath is what we send to the API (relative to workspace root)
   const [relativePath, setRelativePath] = useState('');
   const [dirs, setDirs] = useState<DirEntry[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const ws = workspacePath.value;
 
   useEffect(() => {
     if (open) loadDirs(relativePath);
   }, [open, relativePath]);
 
-  // Convert absolute path to display: /workspace + relative
+  // Convert relative path to absolute using the actual workspace path from the server
   function toAbsolute(rel: string): string {
-    return rel ? `/workspace/${rel}` : '/workspace';
+    return rel ? `${ws}/${rel}` : ws;
   }
 
   async function loadDirs(relPath: string) {
@@ -148,7 +150,7 @@ function DirSelector({ value, onChange }: {
           type="text"
           value={value}
           onInput={e => onChange((e.target as HTMLInputElement).value)}
-          placeholder="/workspace (default)"
+          placeholder={`${ws} (default)`}
         />
         <button class="btn-sm" type="button" onClick={() => setOpen(!open)} title="Browse directories">
           {open ? <IconFolderOpen size={14} /> : <IconFolder size={14} />}
@@ -249,7 +251,7 @@ function CreateAgentModal({ visible, onClose, onCreate }: {
   const [schedule, setSchedule] = useState('0 * * * *');
   const [customCron, setCustomCron] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [cwd, setCwd] = useState('/workspace');
+  const [cwd, setCwd] = useState(workspacePath.value);
   const [model, setModel] = useState('');
   const [timeoutMin, setTimeoutMin] = useState(5);
   const [maxRetries, setMaxRetries] = useState(3);
@@ -276,7 +278,7 @@ function CreateAgentModal({ visible, onClose, onCreate }: {
         timeoutMs: timeoutMin * 60000,
         maxRetries,
       };
-      if (cwd.trim() && cwd.trim() !== '/workspace') body.cwd = cwd.trim();
+      if (cwd.trim() && cwd.trim() !== workspacePath.value) body.cwd = cwd.trim();
 
       const res = await apiFetch('/api/agents', { method: 'POST', body: JSON.stringify(body) });
       const data = await res.json();
@@ -288,7 +290,7 @@ function CreateAgentModal({ visible, onClose, onCreate }: {
       onCreate(data);
       // Reset
       setName(''); setObjective(''); setSchedule('0 * * * *'); setCustomCron('');
-      setCwd('/workspace'); setModel(''); setTimeoutMin(5); setMaxRetries(3);
+      setCwd(workspacePath.value); setModel(''); setTimeoutMin(5); setMaxRetries(3);
       onClose();
     } catch (e) {
       setError('Failed to create agent');
@@ -443,7 +445,7 @@ function EditAgentModal({ agent, visible, onClose, onSave }: {
         name: name.trim(),
         objective: objective.trim(),
         schedule: selectedCron,
-        cwd: cwd.trim() || '/workspace',
+        cwd: cwd.trim() || workspacePath.value,
         model,
         timeoutMs: timeoutMin * 60000,
         maxRetries,
