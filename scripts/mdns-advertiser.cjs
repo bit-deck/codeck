@@ -29,6 +29,9 @@ const HEARTBEAT_INTERVAL = 30000;
 const HOSTS_MARKER_START = '# codeck-ports-start';
 const HOSTS_MARKER_END = '# codeck-ports-end';
 
+// Daemon port for API polling — set by CLI via env, defaults to 80
+const CODECK_PORT = process.env.CODECK_DAEMON_PORT || process.env.CODECK_PORT || '80';
+
 const HEARTBEAT_PATH = path.join(os.tmpdir(), 'codeck-mdns.heartbeat');
 
 const HOSTS_PATH = process.platform === 'win32'
@@ -58,7 +61,7 @@ function getLanIP() {
 
 function fetchPorts() {
   return new Promise((resolve) => {
-    http.get('http://localhost/api/ports', { timeout: 3000 }, (res) => {
+    http.get(`http://localhost:${CODECK_PORT}/api/ports`, { timeout: 3000 }, (res) => {
       let data = '';
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => {
@@ -75,10 +78,12 @@ let lastHostsError = false;
 function updateHostsFile(ports) {
   try {
     const content = fs.readFileSync(HOSTS_PATH, 'utf-8');
-    const entries = ports.map((p) => `127.0.0.1 ${p}.${DOMAIN}`).join('\n');
-    const newBlock = ports.length > 0
-      ? `${HOSTS_MARKER_START}\n${entries}\n${HOSTS_MARKER_END}`
-      : '';
+    // Always include codeck.local itself + any port subdomains
+    const lines = [`127.0.0.1 ${DOMAIN}`];
+    for (const p of ports) {
+      lines.push(`127.0.0.1 ${p}.${DOMAIN}`);
+    }
+    const newBlock = `${HOSTS_MARKER_START}\n${lines.join('\n')}\n${HOSTS_MARKER_END}`;
 
     let newContent;
     const startIdx = content.indexOf(HOSTS_MARKER_START);
@@ -86,15 +91,14 @@ function updateHostsFile(ports) {
 
     if (startIdx !== -1 && endIdx !== -1) {
       newContent = content.substring(0, startIdx) + newBlock + content.substring(endIdx + HOSTS_MARKER_END.length);
-    } else if (newBlock) {
-      newContent = content.trimEnd() + '\n' + newBlock + '\n';
     } else {
-      return;
+      newContent = content.trimEnd() + '\n' + newBlock + '\n';
     }
 
     if (newContent !== content) {
       fs.writeFileSync(HOSTS_PATH, newContent, 'utf-8');
-      console.log(`[hosts] Updated: ${ports.map(p => `${p}.${DOMAIN}`).join(', ') || '(cleared)'}`);
+      const all = [DOMAIN, ...ports.map(p => `${p}.${DOMAIN}`)];
+      console.log(`[hosts] Updated: ${all.join(', ')}`);
     }
     lastHostsError = false;
   } catch (err) {
@@ -164,8 +168,11 @@ responder.on('error', (err) => {
 // Separate UDP socket for unicast DNS responses (not through multicast-dns lib)
 const unicastSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
-console.log(`[Codeck mDNS] ${DOMAIN} → ${lanIP} (${process.platform})`);
+console.log(`[Codeck mDNS] ${DOMAIN} → ${lanIP} (${process.platform}, port ${CODECK_PORT})`);
 console.log(`[Codeck mDNS] Press Ctrl+C to stop`);
+
+// Write codeck.local to hosts file immediately on startup
+updateHostsFile([]);
 
 // --- Proactive mDNS announcements ---
 // Send unsolicited mDNS responses so LAN devices cache the record

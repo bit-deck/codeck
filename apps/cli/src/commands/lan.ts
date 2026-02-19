@@ -82,10 +82,15 @@ lanCommand
     console.log(chalk.yellow('Note: Admin/sudo may be required for hosts file management.'));
 
     // Use child_process.spawn for reliable detached process
+    // Pass daemon port so advertiser polls the correct URL
     const child = spawn(process.execPath, [scriptPath], {
       cwd: scriptsDir,
       detached: true,
       stdio: 'ignore',
+      env: {
+        ...process.env,
+        CODECK_DAEMON_PORT: String(config.port),
+      },
     });
     child.unref();
 
