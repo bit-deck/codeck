@@ -101,6 +101,11 @@ function detectConversationId(session: ConsoleSession, watchExisting = false): v
       }
 
       if (found) {
+        // Validate the file has real conversation messages (not just metadata like file-history-snapshot)
+        if (!hasRealMessages(`${projectDir}/${found}`)) {
+          // Not a real conversation yet — keep polling
+          return;
+        }
         session.conversationId = found.replace('.jsonl', '');
         saveSessionState('conversation_detected');
         console.log(`[Console] Detected conversation: ${session.conversationId} (${watchExisting ? 'resume' : 'new'})`);
@@ -354,6 +359,46 @@ function encodeProjectPath(cwd: string): string {
 }
 
 /**
+ * Check if a .jsonl file contains at least one real conversation message (user or assistant type).
+ * Filters out files that only contain metadata entries like file-history-snapshot.
+ */
+function hasRealMessages(filePath: string): boolean {
+  try {
+    const lines = readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+    return lines.some(line => {
+      try {
+        const d = JSON.parse(line);
+        return d.type === 'user' || d.type === 'assistant';
+      } catch { return false; }
+    });
+  } catch { return false; }
+}
+
+/**
+ * Find the most recent valid conversation ID for the given cwd.
+ * "Valid" means the .jsonl file has at least one real user/assistant message.
+ * Returns undefined if no valid conversation is found.
+ */
+function findMostRecentConversation(cwd: string): string | undefined {
+  const encoded = encodeProjectPath(cwd);
+  const projectDir = `${ACTIVE_AGENT.projectsDir}/${encoded}`;
+  try {
+    if (!existsSync(projectDir)) return undefined;
+    const files = readdirSync(projectDir)
+      .filter(f => f.endsWith('.jsonl'))
+      .flatMap(f => {
+        try { return [{ name: f, mtime: statSync(`${projectDir}/${f}`).mtimeMs }]; }
+        catch { return []; }
+      })
+      .sort((a, b) => b.mtime - a.mtime); // most recent first
+    for (const { name } of files) {
+      if (hasRealMessages(`${projectDir}/${name}`)) return name.replace('.jsonl', '');
+    }
+    return undefined;
+  } catch { return undefined; }
+}
+
+/**
  * Check if a directory has previous Claude Code conversations that can be resumed.
  */
 export function hasResumableConversations(cwd: string): boolean {
@@ -447,10 +492,17 @@ export function restoreSavedSessions(): Array<{ id: string; type: string; cwd: s
           // Best case: we have the exact conversation ID — resume it directly
           session = createConsoleSession({ cwd, resume: true, conversationId: saved.conversationId });
         } else {
-          // Fallback: use --continue to resume the most recent conversation for this cwd
-          // (no interactive picker, no conversationId needed)
-          console.log(`[Console] No conversationId for ${saved.id.slice(0, 8)}, using --continue`);
-          session = createConsoleSession({ cwd, useContinue: true });
+          // Fallback: find the most recent valid conversation (with real user/assistant messages)
+          // and resume it by ID.  Avoids --continue which can fail with trust dialogs or if
+          // it can't find the conversation via its own heuristics.
+          const recentConvId = findMostRecentConversation(cwd);
+          if (recentConvId) {
+            console.log(`[Console] Found recent conversation ${recentConvId.slice(0, 8)} for ${saved.id.slice(0, 8)}, resuming`);
+            session = createConsoleSession({ cwd, resume: true, conversationId: recentConvId });
+          } else {
+            console.log(`[Console] No valid conversations for ${saved.id.slice(0, 8)}, starting fresh`);
+            session = createConsoleSession({ cwd });
+          }
         }
         restored.push({ id: session.id, type: session.type, cwd: session.cwd, name: session.name });
       } else {
