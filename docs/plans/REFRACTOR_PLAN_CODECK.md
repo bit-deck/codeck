@@ -66,7 +66,8 @@ scripts/
 
 - [x] MILESTONE 0 — PREPARACIÓN (completado)
 - [x] MILESTONE 1 — WEBAPP (completado)
-- [ ] MILESTONE 2 — RUNTIME (en progreso: 2.1–2.4 completados, siguiente: 2.5)
+- [x] MILESTONE 2 — RUNTIME (completado)
+- [ ] MILESTONE 3 — DAEMON (siguiente: 3.1)
 
 ---
 
@@ -118,7 +119,7 @@ DONE cuando:
 - [x] Eventos create/update/delete/run
 
 ## 2.5 Memory/Index
-- [ ] Migrar implementación existente
+- [x] Migrar implementación existente
 
 DONE cuando:
 - local mode funciona igual que el sistema actual.

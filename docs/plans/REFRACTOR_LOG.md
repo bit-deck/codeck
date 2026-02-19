@@ -8,7 +8,7 @@ Este archivo registra el progreso y decisiones técnicas.
 
 Branch: refactor/daemon-runtime-gateway
 Modo objetivo: local + gateway
-Último bloque completado: MILESTONE 2.4 — Proactive Agents
+Último bloque completado: MILESTONE 2.5 — Memory/Index (MILESTONE 2 COMPLETO)
 
 ---
 
@@ -191,6 +191,38 @@ Modo objetivo: local + gateway
 - Dependencia `node-cron@^3.0.3` ya está en `apps/runtime/package.json`
 
 **Smoke test:** `npm run build` — OK (frontend vite → apps/web/dist + backend tsc → apps/runtime/dist + copy:templates). Startup en port 9999: `/internal/status` funcionando, 2 agents restaurados correctamente (`Polymarket Bot`, `Codeck Refactor Implementation`), cron scheduling activo. Shutdown limpio con `[ProactiveAgents] Shutdown complete (2 agents)`.
+
+---
+
+### Iteración 7 — MILESTONE 2.5: MEMORY/INDEX
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 2.5 — Memory/Index (migrar implementación existente)
+
+**Cambios:**
+- Verificación de completitud: todo el subsistema de memory/index ya fue migrado en milestone 2.1 (git mv de `src/` a `apps/runtime/src/`)
+- No se requirieron cambios de código — la implementación existente cubre todos los puntos del milestone
+- **MILESTONE 2 — RUNTIME está ahora COMPLETO**
+
+**Componentes verificados:**
+- **memory.ts** (656 líneas): Persistencia file-based — durable memory, daily journals, ADRs, path-scoped memory con SHA-256 pathIds, legacy migration, flush, context assembly
+- **memory-indexer.ts** (511 líneas): SQLite FTS5 indexer con file watcher, markdown/JSONL chunking, sqlite-vec opcional para embeddings
+- **memory-search.ts** (256 líneas): BM25 full-text search, hybrid search con Reciprocal Rank Fusion, filtrado por scope/pathId/project/date
+- **memory-context.ts** (173 líneas): Context injection para sesiones nuevas, inyecta memoria en `/workspace/CLAUDE.md`
+- **memory.routes.ts** (454 líneas): API REST completa — durable CRUD, daily, decisions, paths, promote, flush, sessions, search, context, backward compat
+- **Wiring en server.ts**: imports (L25-30), route registration (L281), init (L374-376), shutdown (L330-332), ensureDirectories (L363), localhost auth bypass (L213-217)
+
+**Problemas:** Ninguno.
+
+**Decisiones:**
+- Este milestone no requirió cambios de código — el subsistema completo fue migrado intacto en 2.1 (via `git mv`)
+- El indexer SQLite FTS5 y el vector search (sqlite-vec) están operacionales — 47 archivos indexados, 231 chunks
+- La búsqueda híbrida BM25 + vector con RRF está funcional
+- Los 3 path scopes están registrados y funcionando
+- El auth bypass para localhost (127.0.0.1) permite a los agents llamar `/api/memory/*` sin token
+- Con esto se completa MILESTONE 2 — el runtime tiene feature parity con el sistema original
+
+**Smoke test:** `npm run build` — OK (frontend vite → apps/web/dist + backend tsc → apps/runtime/dist + copy:templates). Startup en port 9999: `/internal/status` → `{"status":"ok","uptime":4.01}`, `/api/memory/status` → `{"durableExists":true,"dailyCount":1,"pathScopes":3}`, `/api/memory/search?q=codeck` → resultados encontrados, `/api/memory/search/stats` → `{"available":true,"fileCount":47,"chunkCount":231}`. Shutdown limpio.
 
 ---
 
