@@ -110,6 +110,32 @@ else
   log "Docker installed: $(docker --version)"
 fi
 
+# ─── GitHub CLI ─────────────────────────────────────────────────────
+
+step "GitHub CLI (gh)"
+
+if command -v gh &>/dev/null; then
+  log "GitHub CLI already installed: $(gh --version | head -1)"
+else
+  log "Installing GitHub CLI..."
+  case "$PKG_MANAGER" in
+    apt)
+      curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list
+      apt-get update -qq
+      apt-get install -y -qq gh >/dev/null
+      ;;
+    dnf|yum)
+      $PKG_MANAGER install -y -q 'dnf-command(config-manager)' 2>/dev/null || true
+      $PKG_MANAGER config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo 2>/dev/null || true
+      $PKG_MANAGER install -y -q gh >/dev/null
+      ;;
+  esac
+  log "GitHub CLI installed: $(gh --version | head -1)"
+fi
+
 # ─── Claude Code CLI ────────────────────────────────────────────────
 
 step "Claude Code CLI"
