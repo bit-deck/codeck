@@ -1,4 +1,4 @@
-import { setWsConnected, updateStateFromServer, addLog, sessions, activeSessionId, addSession, setActiveSessionId, setActivePorts, setActiveSection, type LogEntry, removeSession, updateProactiveAgent, appendAgentOutput, setAgentRunning } from './state/store';
+import { setWsConnected, updateStateFromServer, addLog, sessions, activeSessionId, addSession, setActiveSessionId, setActivePorts, setActiveSection, setRestoringPending, type LogEntry, removeSession, updateProactiveAgent, appendAgentOutput, setAgentRunning } from './state/store';
 import { getAuthToken } from './api';
 
 // Known WebSocket message types — reject anything not in this set
@@ -140,8 +140,11 @@ export function connectWebSocket(): void {
         }
         if (restored.length > 0) {
           if (!activeSessionId.value) setActiveSessionId(restored[0].id);
-          // Navigate to the terminal view so ClaudeSection mounts and creates terminals
+          // Navigate to the terminal view so ClaudeSection mounts and creates terminals.
+          // restoringPending stays true — ClaudeSection resets it after mounting all terminals.
           setActiveSection('claude');
+        } else {
+          setRestoringPending(false);
         }
       } else if (msg.type === 'console:error') {
         // Session not found on server (e.g., after container restart) — remove ghost
@@ -180,6 +183,7 @@ export function connectWebSocket(): void {
 
   ws.onclose = () => {
     setWsConnected(false);
+    setRestoringPending(false);
     ws = null;
     if (staleCheckTimer) { clearInterval(staleCheckTimer); staleCheckTimer = null; }
 

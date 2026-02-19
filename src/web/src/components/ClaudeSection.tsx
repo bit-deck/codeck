@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile } from '../state/store';
+import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile, setRestoringPending } from '../state/store';
 import { apiFetch } from '../api';
 import { createTerminal, destroyTerminal, fitTerminal, focusTerminal, writeToTerminal } from '../terminal';
 import { wsSend, setTerminalHandlers, attachSession } from '../ws';
@@ -42,7 +42,7 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
     );
   }, []);
 
-  // Mount terminals for restored sessions that don't have DOM elements yet (after F5)
+  // Mount terminals for restored sessions that don't have DOM elements yet (after F5 or restore)
   useEffect(() => {
     const container = instancesRef.current;
     if (!container) return;
@@ -61,6 +61,9 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
       attachSession(s.id);
       wsSend({ type: 'console:resize', sessionId: s.id, cols: instance.term.cols, rows: instance.term.rows });
     }
+
+    // All sessions now have terminals — restore is complete, hide the overlay
+    setRestoringPending(false);
   }, [sessionList.length]);
 
   // Toggle visible terminal when active tab changes

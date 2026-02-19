@@ -3,7 +3,7 @@ import { Server } from 'http';
 import { getClaudeStatus, isClaudeAuthenticated } from '../services/auth-anthropic.js';
 import { ACTIVE_AGENT } from '../services/agent.js';
 import { getGitStatus, getWorkspacePath } from '../services/git.js';
-import { getSession, writeToSession, resizeSession, destroySession, markSessionAttached, listSessions } from '../services/console.js';
+import { getSession, writeToSession, resizeSession, destroySession, markSessionAttached, listSessions, hasSavedSessions } from '../services/console.js';
 import { getLogBuffer, setWsClients, broadcast } from './logger.js';
 import { isPasswordConfigured, validateSession } from '../services/auth.js';
 import { detectDockerSocketMount } from '../services/environment.js';
@@ -134,6 +134,7 @@ export function setupWebSocket(server: Server): void {
         workspace: getWorkspacePath(),
         agent: { name: ACTIVE_AGENT.name, id: ACTIVE_AGENT.id },
         sessions: listSessions(),
+        pendingRestore: hasSavedSessions(),
         dockerExperimental: detectDockerSocketMount(),
       },
     }));

@@ -1,13 +1,18 @@
-import { wsConnected } from '../state/store';
+import { wsConnected, restoringPending } from '../state/store';
 
 export function ReconnectOverlay() {
-  if (wsConnected.value) return null;
+  const disconnected = !wsConnected.value;
+  const restoring = restoringPending.value;
+
+  if (!disconnected && !restoring) return null;
+
+  const message = disconnected ? 'Reconnecting...' : 'Restoring sessions...';
 
   return (
     <div class="reconnect-overlay">
       <div class="reconnect-content">
         <div class="loading" />
-        <div class="reconnect-text">Reconnecting...</div>
+        <div class="reconnect-text">{message}</div>
       </div>
     </div>
   );
