@@ -14,5 +14,5 @@
   },
   "references": [],
   "files": [],
-  "exclude": ["apps", "packages"]
+  "exclude": ["apps"]
 }

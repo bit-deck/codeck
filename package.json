@@ -5,8 +5,7 @@
   "type": "module",
   "main": "apps/runtime/dist/index.js",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/*"
   ],
   "scripts": {
     "build:frontend": "npm run build -w @codeck/web",
