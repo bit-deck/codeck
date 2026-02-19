@@ -1,76 +1,83 @@
 # Codeck
 
-**Freedom for the agent.** Codeck gives Claude Code its own persistent environment — a dedicated workspace with memory, tools, and full autonomy. Access it from any browser.
+**Freedom for the agent. Claude Sandbox.**
 
-Run it as a Docker container on your laptop, or deploy it as a systemd service on a dedicated VPS and let the agent live there full-time.
+Codeck is a dedicated environment for Claude Code — persistent workspace, memory across sessions, full tool access, accessible from any browser.
+
+Give the agent its own machine. Let it live there.
 
 ---
 
-## Deployment options
+## The idea
 
-### VPS / Dedicated server (recommended)
+Claude Code is powerful, but it's stateless by default — every session starts from zero. Codeck changes that:
 
-The agent gets its own machine. Persistent memory, background tasks, always-on.
+- **Persistent workspace** — projects, files, and memory survive restarts
+- **Memory system** — FTS5-indexed notes, per-project context, daily journals, durable facts the agent accumulates over time
+- **Always-on** — deploy to a VPS and the agent is there whenever you need it
+- **Full autonomy** — terminal access, git, GitHub, Docker, internet — no hand-holding
+
+You open a browser, the agent is ready. You close it, the agent keeps working.
+
+---
+
+## Deploy
+
+### On a VPS (recommended)
+
+The agent gets its own machine. The simplest path to a persistent, always-on sandbox.
 
 ```bash
-# Fresh VPS — installs everything and starts the service
 curl -fsSL https://raw.githubusercontent.com/cyphercr0w/codeck/main/scripts/dev-setup.sh | sudo bash
 ```
 
-After setup, open `http://<your-server-ip>` in the browser.
+Opens on `http://<your-ip>`. After that:
 
 ```bash
-# Service management
-systemctl status codeck
-journalctl -u codeck -f
-npm run build && sudo systemctl restart codeck   # deploy code changes
+systemctl status codeck          # check service
+journalctl -u codeck -f          # follow logs
 ```
 
-### Docker (local or cloud)
+### With Docker (local)
 
 ```bash
-# 1. Build base image (once, ~5 min)
-docker build -t codeck-base -f Dockerfile.base .
-
-# 2. Start
+docker build -t codeck-base -f Dockerfile.base .   # once
 docker compose up
-
-# 3. Open http://localhost
+# → http://localhost
 ```
 
-### CLI (Docker lifecycle manager)
+### CLI (Docker lifecycle)
 
 ```bash
 cd cli && npm install && npm run build && npm link
 
-codeck init      # interactive setup wizard
+codeck init      # guided setup
 codeck start     # start container
 codeck open      # open in browser
-codeck status    # show URLs and config
+codeck status    # URLs + config
 codeck logs      # stream logs
 ```
 
 ---
 
-## What it gives the agent
+## Features
 
-- **Persistent workspace** — projects and memory survive restarts
-- **Full tool access** — terminal, git, GitHub CLI, Docker, internet
-- **Memory system** — SQLite FTS5 search, per-project context, daily journals, durable memory across sessions
-- **Up to 5 concurrent PTY terminals** — via node-pty + xterm.js + WebSocket
-- **Proactive agents** — schedule recurring tasks (cron-style)
-- **File browser** — view and edit workspace files from the browser
-- **GitHub integration** — SSH keys + CLI device flow authentication
-- **Port preview** — dev servers inside the environment accessible via browser
+**For the agent**
+- Up to 5 concurrent PTY terminals (node-pty + xterm.js)
+- Persistent memory: FTS5 search, per-project MEMORY.md, daily journals, global durable context
+- Proactive agents — schedule recurring tasks (cron-style)
+- Full environment: git, GitHub CLI, Docker, internet access
 
-## What it gives you
-
-- **Browser UI** — access from anywhere, including phones and tablets
-- **Claude OAuth** — PKCE auth flow, automatic token refresh
-- **Local password** — scrypt-hashed, 7-day session tokens
-- **LAN access** — `codeck.local` from any device on your network via mDNS
-- **Dashboard** — CPU, memory, disk, active sessions, Claude API usage
-- **Preset system** — manifest-driven workspace configuration
+**For you**
+- Browser UI — works from phones, tablets, anywhere
+- Claude OAuth PKCE — automatic token refresh, no manual re-auth
+- Local password auth — scrypt-hashed, 7-day sessions
+- File browser with editor
+- GitHub integration — SSH keys + CLI device flow
+- Dashboard — CPU, memory, disk, session count, API usage
+- LAN access — `codeck.local` from any device via mDNS
+- Workspace export as `.tar.gz`
+- Preset system — manifest-driven workspace configuration
 
 ---
 
@@ -78,17 +85,17 @@ codeck logs      # stream logs
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  Codeck (Docker container or VPS systemd service)    │
+│  Codeck  (Docker container or systemd VPS service)   │
 │                                                      │
 │  ┌────────────────────────────────────────────────┐  │
-│  │  Express Server (:80 or :8080)                 │  │
+│  │  Express + WebSocket                           │  │
 │  │  ├── REST API (/api/*)                         │  │
-│  │  ├── WebSocket (terminal I/O + logs)           │  │
-│  │  └── Static files (Vite build)                 │  │
+│  │  ├── WebSocket (terminal I/O + live updates)   │  │
+│  │  └── Static frontend (Vite build)              │  │
 │  └────────────────────────────────────────────────┘  │
 │                                                      │
 │  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │ Claude   │  │ node-pty │  │ Memory system     │  │
+│  │ Claude   │  │ node-pty │  │ Memory            │  │
 │  │ Code CLI │  │ sessions │  │ (SQLite FTS5)     │  │
 │  └──────────┘  └──────────┘  └───────────────────┘  │
 │                                                      │
@@ -96,32 +103,30 @@ codeck logs      # stream logs
 └──────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────┐
-│  Browser (Preact + xterm.js)                         │
-│  ├── Auth (password + OAuth + preset wizard)         │
-│  ├── Home (account, resources, usage dashboard)      │
-│  ├── Files (file browser + editor)                   │
-│  ├── Claude (PTY terminals, up to 5 sessions)        │
-│  ├── Agents (proactive / scheduled tasks)            │
-│  ├── Integrations (GitHub SSH + CLI device flow)     │
-│  ├── Memory (workspace .codeck/ viewer/editor)       │
-│  └── Settings (password, sessions, auth log)         │
+│  Browser  (Preact + xterm.js)                        │
+│  ├── Home     — dashboard, account, usage            │
+│  ├── Claude   — PTY terminals (up to 5)              │
+│  ├── Agents   — proactive / scheduled tasks          │
+│  ├── Files    — browser + editor                     │
+│  ├── Memory   — .codeck/ viewer and editor           │
+│  ├── Integrations — GitHub SSH + CLI auth            │
+│  └── Settings — password, sessions, auth log         │
 └──────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## LAN access (`codeck.local`)
+## LAN access
 
 ```bash
-# With CLI
-codeck lan start
+codeck lan start                  # via CLI
 
-# Without CLI
+# or manually:
 docker compose -f docker-compose.yml -f docker-compose.lan.yml up
-cd scripts && npm install && node scripts/mdns-advertiser.cjs
+node scripts/mdns-advertiser.cjs  # (requires admin)
 ```
 
-Broadcasts `codeck.local` and `{port}.codeck.local` via mDNS — reachable from phones, tablets, and any LAN device.
+Broadcasts `codeck.local` and `{port}.codeck.local` via mDNS — reachable from any device on the network.
 
 ## Docker socket (experimental)
 
@@ -129,7 +134,7 @@ Broadcasts `codeck.local` and `{port}.codeck.local` via mDNS — reachable from 
 docker compose -f docker-compose.yml -f docker-compose.experimental.yml up
 ```
 
-Mounts `/var/run/docker.sock` for Docker-in-Docker and dynamic port mapping. Removes container isolation — only use on trusted systems.
+Mounts `/var/run/docker.sock` for Docker-in-Docker and dynamic port mapping. Removes container isolation — only for trusted personal use.
 
 ---
 
@@ -140,27 +145,31 @@ Mounts `/var/run/docker.sock` for Docker-in-Docker and dynamic port mapping. Rem
 | Frontend | Preact 10, @preact/signals, xterm.js 5.5, Vite 5.4 |
 | Backend | Node.js 22+, Express 4.18, ws 8.16 |
 | Terminal | node-pty 1.0 + xterm.js |
-| Memory | SQLite FTS5, session summarizer, context injection |
-| Networking | multicast-dns 7.2 (mDNS/Bonjour) |
-| Container | Docker, tini, gnome-keyring |
+| Memory | SQLite FTS5, session summarizer, CLAUDE.md injection |
+| Networking | multicast-dns 7.2 |
+| Runtime | Docker or systemd (VPS) |
 | CLI tools | Claude Code, GitHub CLI, git, openssh |
 | Codeck CLI | Commander, @clack/prompts, execa, conf |
 
 ## Security
 
-- **Credentials**: OAuth tokens at mode 0600, password hashed with scrypt + salt
-- **Rate limiting**: per-route (10/min auth, 200/min general), 7-day session TTL
-- **Docker hardening**: `cap_drop ALL`, minimal `cap_add`, `no-new-privileges`, `pids_limit 512`
-- **Logging**: automatic sanitization of Anthropic and GitHub tokens
+- OAuth tokens at `0600`, password hashed with scrypt + random salt
+- Rate limiting: 10/min on auth routes, 200/min general, 7-day session TTL
+- Docker: `cap_drop ALL`, `no-new-privileges`, `pids_limit 512`
+- Log sanitization: Anthropic and GitHub tokens scrubbed automatically
+
+---
 
 ## Documentation
 
-Full technical docs in [`docs/`](docs/README.md):
+[`docs/`](docs/README.md) — full technical reference:
 
-- [Architecture](docs/ARCHITECTURE.md) — system design, process lifecycle, security model
-- [API Reference](docs/API.md) — REST endpoints and WebSocket protocol
-- [Services](docs/SERVICES.md) — backend service layer internals
-- [Frontend](docs/FRONTEND.md) — Preact SPA, components, signals, CSS
-- [Configuration](docs/CONFIGURATION.md) — env vars, Docker, volumes, presets
-- [Deployment](docs/DEPLOYMENT.md) — systemd install, VPS setup, service management
-- [Known Issues](docs/KNOWN-ISSUES.md) — bugs, tech debt, improvements
+| Doc | Covers |
+|-----|--------|
+| [Architecture](docs/ARCHITECTURE.md) | System design, auth flows, security model |
+| [API](docs/API.md) | REST endpoints and WebSocket protocol |
+| [Services](docs/SERVICES.md) | Backend service layer internals |
+| [Frontend](docs/FRONTEND.md) | Preact SPA, components, signals, CSS |
+| [Configuration](docs/CONFIGURATION.md) | Env vars, Docker, volumes, presets |
+| [Deployment](docs/DEPLOYMENT.md) | systemd install, VPS setup, troubleshooting |
+| [Known Issues](docs/KNOWN-ISSUES.md) | Bugs, tech debt, planned improvements |
