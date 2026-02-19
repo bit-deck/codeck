@@ -37,6 +37,7 @@ services:
       - CODECK_DAEMON_URL=http://host.docker.internal:${CODECK_DAEMON_PORT:-8080}
       - CODECK_DIR=/data/.codeck
       - CODECK_INTERNAL_SECRET=${CODECK_INTERNAL_SECRET:-}
+      - CODECK_DAEMON_PORT=${CODECK_DAEMON_PORT:-8080}
       - WORKSPACE=/workspace
       - CODECK_UID=${CODECK_UID:-}
       - CODECK_GID=${CODECK_GID:-}

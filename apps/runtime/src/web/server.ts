@@ -99,6 +99,21 @@ export async function startWebServer(): Promise<void> {
     res.json({ status: 'ok', uptime: process.uptime() });
   });
 
+  // Managed mode: redirect direct browser access to the daemon port.
+  // The daemon proxy always sets X-Codeck-Internal, so its absence means direct access.
+  const DAEMON_PORT = process.env.CODECK_DAEMON_PORT;
+  const MANAGED_SECRET = process.env.CODECK_INTERNAL_SECRET;
+  if (DAEMON_PORT && MANAGED_SECRET) {
+    app.use((req, res, next) => {
+      // Let API, internal, and daemon-proxied requests through
+      if (req.path.startsWith('/api') || req.path.startsWith('/internal')) return next();
+      if (req.headers['x-codeck-internal'] === MANAGED_SECRET) return next();
+      // Direct browser access — redirect to daemon
+      const portSuffix = DAEMON_PORT === '80' ? '' : `:${DAEMON_PORT}`;
+      res.redirect(`http://${req.hostname}${portSuffix}${req.originalUrl}`);
+    });
+  }
+
   // Hashed assets (JS/CSS) get long cache; index.html always revalidates
   app.use(express.static(WEB_DIST, {
     setHeaders(res, filePath) {
