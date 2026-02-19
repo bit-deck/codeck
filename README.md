@@ -22,6 +22,8 @@ codeck stop
 codeck status
 codeck logs
 codeck open
+codeck restart
+codeck doctor      # diagnose configuration issues
 ```
 
 Or with npm workspace: `npx -w @codeck/cli codeck init`. Link globally with `npm link -w @codeck/cli`.
@@ -32,8 +34,18 @@ Daemon on host handles auth, webapp, and port exposure. Runtime in isolated cont
 
 ```bash
 codeck init        # choose "Managed"
-codeck start       # starts runtime container + daemon in foreground
+codeck start       # starts runtime container + daemon in foreground (Ctrl+C to stop)
 ```
+
+#### LAN access (macOS / Windows)
+
+```bash
+codeck lan start   # start mDNS advertiser — codeck.local resolves on all LAN devices
+codeck lan stop    # stop advertiser and clean up hosts file
+codeck lan status  # check if advertiser is running
+```
+
+On Linux, LAN access uses host networking — configure via `codeck init` instead.
 
 ### Linux VPS — systemd service
 

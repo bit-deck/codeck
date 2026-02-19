@@ -30,7 +30,7 @@ apps/
 ├── web/        Preact SPA (Vite build → apps/web/dist/)
 ├── runtime/    Backend: PTY, files, memory, agents, auth setup (Express + WS)
 ├── daemon/     Gateway proxy: auth, rate limiting, audit, HTTP/WS proxy (Express)
-└── cli/        Host-side CLI for Docker lifecycle (codeck init/start/stop)
+└── cli/        Host-side CLI for Docker lifecycle (codeck init/start/stop/status/logs/open/restart/doctor/lan)
 ```
 
 All four apps build independently (`npm run build`). The runtime and daemon share no code — communication is HTTP/WS over the network.
@@ -126,11 +126,13 @@ Browser                    Daemon (host)              Runtime (container)
   │ ← {token} ──────────────│                           │
   │                          │                          │
   │ GET /api/console ──────→ │ validate token           │
-  │                          │ proxy ──────────────────→ │ handle request
+  │                          │ strip Authorization      │
+  │                          │ add X-Codeck-Internal ──→ │ bypass auth (trusted proxy)
   │                          │ ← response ──────────────│
   │ ← response ─────────────│                           │
   │                          │                          │
   │ WS upgrade ────────────→ │ validate token           │
+  │                          │ add X-Codeck-Internal ──→ │ bypass auth (trusted proxy)
   │                          │ upgrade + pipe ─────────→ │ accept WS
   │ ← bidirectional ────────│←─────────────────────────│
 ```
@@ -143,11 +145,21 @@ Browser                    Daemon (host)              Runtime (container)
 - `GET /api/auth/sessions` — list active sessions
 - `DELETE /api/auth/sessions/:id` — revoke session
 - `GET /api/auth/log` — auth event history
-- `GET /api/ports` — list mapped ports (port manager)
-- `POST /api/system/add-port` — expose a port (port manager)
-- `POST /api/system/remove-port` — remove a port mapping (port manager)
+- `GET /api/ports` — list mapped ports (daemon port manager)
+- `POST /api/system/add-port` — expose a port (daemon port manager)
+- `POST /api/system/remove-port` — remove a port mapping (daemon port manager)
 
-**All other `/api/*`** requests are proxied to the runtime with `X-Forwarded-*` headers. The daemon strips its own `Authorization` header before proxying.
+**All other `/api/*`** requests are proxied to the runtime. The daemon strips its own `Authorization` header and adds `X-Codeck-Internal: <secret>` before proxying.
+
+### Internal secret (`CODECK_INTERNAL_SECRET`)
+
+In managed mode, the CLI (or `start-managed.sh`) generates a random 32-byte secret at startup and passes it to both the daemon and the runtime container via environment variable. This secret powers two mechanisms:
+
+1. **Daemon → runtime auth bypass.** The daemon adds `X-Codeck-Internal: <secret>` to every proxied HTTP request and WebSocket upgrade. The runtime auth middleware recognises this header and skips token validation — the daemon has already authenticated the user.
+
+2. **Direct browser redirect.** If the runtime receives a non-API request *without* `X-Codeck-Internal` (i.e., someone hit the runtime port directly, not via the daemon), it redirects the browser to the daemon port. This prevents accidentally serving the webapp from an unauthenticated port.
+
+The secret is never written to disk — it is generated fresh on every boot and shared only in-process via environment variables. If the daemon restarts without restarting the runtime, the secret mismatch causes the redirect to trigger; restart both together.
 
 ### Port exposure flow (managed mode)
 
@@ -264,23 +276,28 @@ The container uses `tini` as PID 1 (`init: true` in docker-compose) to reap zomb
 
 ## Backend
 
-The backend is split between two Express applications: the **runtime** (all business logic) and the **daemon** (auth gateway + proxy). In local mode, only the runtime runs. In gateway mode, both run.
+The backend is split between two Express applications: the **runtime** (all business logic) and the **daemon** (auth gateway + proxy). In isolated mode, only the runtime runs. In managed mode, both run.
 
 ### Runtime middleware pipeline
 
-Requests to `/api/*` pass through this pipeline in order:
+Requests pass through this pipeline in order:
 
 ```
-Request → Static Files → JSON Parser → Rate Limiter → Auth Endpoints (public) → Auth Middleware → Routes
+Request → /internal/status (pre-auth) → Managed redirect → Static Files → JSON Parser
+        → Rate Limiter → Auth Endpoints (public) → Auth Middleware → Routes
 ```
 
-1. **Static files** — `express.static(apps/web/dist)` serves the compiled frontend (local mode only; daemon serves SPA in gateway mode)
-2. **JSON parser** — `express.json()` for body parsing
-3. **Rate limiter** — In-memory Map, per-route: 10 req/min for `/api/auth`, 200 req/min for `/api/*`, with 5-minute stale IP cleanup
-4. **Auth endpoints** — `/api/auth/status`, `/setup`, `/login` are public; `/logout` and `/change-password` are protected
-5. **Auth middleware** — Validates `Authorization: Bearer <token>` or `?token=` query param against `activeSessions` Map. Localhost (127.0.0.1) bypasses auth for `/api/memory/*` (agent access)
-6. **Routes** — 14 routers mounted at `/api/<domain>`, plus inline auth/status/logs/ports/account endpoints
-7. **Internal endpoints** — `/internal/status` returns `{status: "ok", uptime}` (registered before auth middleware, used by daemon for health checks)
+1. **Internal endpoint** — `/internal/status` returns `{status: "ok", uptime}`. Registered before all other middleware; used by daemon for health checks.
+2. **Managed redirect** — If `CODECK_INTERNAL_SECRET` is set (managed mode only): non-API requests without `X-Codeck-Internal` header are redirected to the daemon port. Prevents serving the webapp from the unauthenticated runtime port.
+3. **Static files** — `express.static(apps/web/dist)` serves the compiled frontend (isolated mode only; daemon serves SPA in managed mode)
+4. **JSON parser** — `express.json()` for body parsing
+5. **Rate limiter** — In-memory Map, per-route: 10 req/min for `/api/auth`, 200 req/min for `/api/*`, with 5-minute stale IP cleanup
+6. **Auth endpoints** — `/api/auth/status`, `/setup`, `/login` are public; `/logout` and `/change-password` are protected
+7. **Auth middleware** — Validates `Authorization: Bearer <token>` or `?token=` query param against `activeSessions` Map. Two bypass paths:
+   - `X-Codeck-Internal: <secret>` header (managed mode) — daemon-proxied requests skip user token validation
+   - Localhost (127.0.0.1) — bypasses auth for `/api/memory/*` (agent access from inside the container)
+8. **Routes** — 14 routers mounted at `/api/<domain>`, plus inline auth/status/logs/ports/account endpoints
+9. **Internal endpoints** — `/internal/status` returns `{status: "ok", uptime}` (registered before auth middleware, used by daemon for health checks)
 
 ### Daemon middleware pipeline (gateway mode)
 
@@ -318,17 +335,18 @@ Each service is an ES module with pure functions (no classes). Mutable state is 
 | `port-manager` | `services/port-manager.ts` | `networkMode`, `mappedPorts: Set`, `containerId`, compose labels | Writes `compose.override.yml` via Docker helper |
 | `logger` | `web/logger.ts` | `logBuffer: LogEntry[]` (circular, max 100), `wsClients[]` | None |
 
-### Daemon service layer (gateway mode)
+### Daemon service layer (managed mode)
 
 Daemon services run in a separate process (`apps/daemon/`). They handle auth gating and proxying — no business logic.
 
 | Service | File | In-memory state | Disk persistence |
 |---------|------|-----------------|------------------|
-| `auth` | `services/auth.ts` | `activeSessions: Map<token, SessionData>` | `/workspace/.codeck/daemon-sessions.json` (mode 0600). Reads `/workspace/.codeck/auth.json` (shared with runtime, read-only) |
-| `audit` | `services/audit.ts` | `buffer: string[]` (flush every 5s or 20 entries) | `/workspace/.codeck/audit.log` (JSONL, mode 0600) |
+| `auth` | `services/auth.ts` | `activeSessions: Map<token, SessionData>` | `CODECK_DIR/daemon-sessions.json` (mode 0600). Reads `CODECK_DIR/auth.json` (shared with runtime, read-only) |
+| `audit` | `services/audit.ts` | `buffer: string[]` (flush every 5s or 20 entries) | `CODECK_DIR/audit.log` (JSONL, mode 0600) |
 | `rate-limit` | `services/rate-limit.ts` | `RateLimiter` instances (per-IP sliding window) | None |
 | `proxy` | `services/proxy.ts` | None | None |
 | `ws-proxy` | `services/ws-proxy.ts` | `connections: Set<WsConnection>`, ping interval | None |
+| `port-manager` | `services/port-manager.ts` | `mappedPorts: Set<number>` | Writes `docker/compose.override.yml`, restarts runtime container via `docker compose up -d` |
 
 ### Runtime routers
 
@@ -542,7 +560,7 @@ export async function apiFetch(url: string, options?: RequestInit): Promise<Resp
 
 Access authentication for the webapp. Single-user, stored in the container.
 
-**In local mode**, the runtime handles all auth directly. **In gateway mode**, the daemon has its own session store (`daemon-sessions.json`) and validates passwords against the shared `auth.json`. The runtime trusts the private network — daemon strips its auth header before proxying.
+**In isolated mode**, the runtime handles all auth directly. **In managed mode**, the daemon has its own session store (`daemon-sessions.json`) and validates passwords against the shared `auth.json`. The runtime trusts proxied requests via `X-Codeck-Internal` — the daemon strips its own `Authorization` header and adds this secret header before proxying, so the runtime never sees user session tokens.
 
 ```
 ┌────────┐                         ┌────────┐                    ┌─────────────────────────┐
@@ -1511,7 +1529,7 @@ The daemon runs on the host as a native Node.js process (not in a container). Se
 │   │   │   └── templates/            # CLAUDE.md templates, presets
 │   │   ├── daemon/dist/              # Daemon gateway
 │   │   │   ├── index.js              # Entry point
-│   │   │   └── services/             # auth, audit, proxy, rate-limit, ws-proxy
+│   │   │   └── services/             # auth, audit, port-manager, proxy, rate-limit, ws-proxy
 │   │   └── cli/dist/                 # CLI tool (host-side only, not in container)
 │   ├── node_modules/
 │   └── package.json

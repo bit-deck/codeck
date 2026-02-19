@@ -49,9 +49,17 @@ npm run build:cli   # from project root
 
 ## LAN Access
 
-Run the host-side mDNS advertiser for LAN device discovery (works on all platforms):
+Via CLI (recommended):
 
-```powershell
+```bash
+codeck lan start   # start mDNS advertiser (macOS/Windows — requires admin/UAC)
+codeck lan stop    # stop and clean up hosts file entries
+codeck lan status  # check status
+```
+
+Or run the advertiser directly (skips CLI lifecycle management):
+
+```bash
 # One-time setup:
 cd scripts && npm install
 
@@ -59,7 +67,7 @@ cd scripts && npm install
 node scripts/mdns-advertiser.cjs
 ```
 
-This makes `codeck.local` and `{port}.codeck.local` resolvable from phones, tablets, and other LAN devices. See `docs/CONFIGURATION.md` for details.
+This makes `codeck.local` and `{port}.codeck.local` resolvable from phones, tablets, and other LAN devices. On Linux, LAN access is configured via `codeck init` (host networking). See `docs/DEPLOYMENT.md` for details.
 
 ## Conventions
 

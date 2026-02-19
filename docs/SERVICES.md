@@ -73,9 +73,9 @@ Forwards `/api/*` requests (not handled by daemon) to the runtime.
 | `checkRuntime` | `(): Promise<boolean>` | Health check against runtime `/internal/status` |
 | `getRuntimeUrl` | `(): string` | Return configured runtime URL |
 
-**Behavior:** Strips `Authorization` header (daemon auth), adds `X-Forwarded-*` headers. Re-serializes `req.body` (consumed by `express.json()`). Returns 502 on connection error, 504 on timeout.
+**Behavior:** Strips `Authorization` header (daemon auth token), adds `X-Forwarded-*` headers and `X-Codeck-Internal: <secret>` (runtime auth bypass). Re-serializes `req.body` (consumed by `express.json()`). Returns 502 on connection error, 504 on timeout.
 
-**Env vars:** `CODECK_RUNTIME_URL` (default `http://codeck-runtime:7777`), `PROXY_TIMEOUT_MS` (default 30000)
+**Env vars:** `CODECK_RUNTIME_URL` (default `http://codeck-runtime:7777`), `PROXY_TIMEOUT_MS` (default 30000), `CODECK_INTERNAL_SECRET` (shared secret, set by CLI/start-managed.sh)
 
 ### `daemon/services/ws-proxy.ts` — WebSocket Proxy
 
@@ -87,9 +87,28 @@ Handles HTTP upgrade on the daemon, authenticates, and creates a bidirectional s
 | `shutdownWsProxy` | `(): void` | Close all connections, stop ping interval |
 | `getWsConnectionCount` | `(): number` | Active connections (exposed in `/api/ui/status`) |
 
-**Behavior:** Validates daemon session token from `?token=` query param. Strips token before proxying. Bidirectional pipe via `socket.pipe()`. WebSocket ping frames every 30s, stale cleanup at 75s. Max 20 concurrent connections.
+**Behavior:** Validates daemon session token from `?token=` query param. Strips token before proxying. Adds `X-Codeck-Internal: <secret>` to the upgrade request so the runtime trusts the connection. Bidirectional pipe via `socket.pipe()`. WebSocket ping frames every 30s, stale cleanup at 75s. Max 20 concurrent connections.
 
-**Env vars:** `CODECK_RUNTIME_WS_URL` (default = `CODECK_RUNTIME_URL`), `MAX_WS_CONNECTIONS` (20), `WS_PING_INTERVAL_MS` (30000)
+**Env vars:** `CODECK_RUNTIME_WS_URL` (default = `CODECK_RUNTIME_URL`), `MAX_WS_CONNECTIONS` (20), `WS_PING_INTERVAL_MS` (30000), `CODECK_INTERNAL_SECRET`
+
+### `daemon/services/port-manager.ts` — Daemon Port Manager
+
+Manages dynamic port exposure for the runtime container. Handles requests from the runtime (via `CODECK_DAEMON_URL`) to map new ports without requiring a Docker socket inside the container.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `initDaemonPortManager` | `(opts?): void` | Read env vars, recover existing mapped ports from `compose.override.yml` |
+| `addPort` | `(port): Result` | Add port to override file and restart runtime container |
+| `removePort` | `(port): Result` | Remove port from override file and restart runtime container |
+| `getMappedPorts` | `(): PortInfo[]` | Return list of currently mapped ports |
+| `isPortExposed` | `(port): boolean` | Check if a specific port is already mapped |
+| `isPortManagerEnabled` | `(): boolean` | Returns `true` if `CODECK_PROJECT_DIR` is set |
+
+**Behavior:** Writes `docker/compose.override.yml` with extra port mappings and runs `docker compose up -d --wait runtime` to apply them without full restart. Recovers previously mapped ports from the override file on init. Falls back to proxying to the runtime if `CODECK_PROJECT_DIR` is not set (port manager disabled).
+
+**State:** `mappedPorts: Set<number>` — in-memory, recovered from disk on startup.
+
+**Env vars:** `CODECK_PROJECT_DIR` (required, path to repo root), `CODECK_COMPOSE_FILE` (default `docker/compose.managed.yml`), `CODECK_DAEMON_PORT` (excluded from user-facing port list)
 
 ---
 

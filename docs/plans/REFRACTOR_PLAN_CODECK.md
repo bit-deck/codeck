@@ -1,25 +1,19 @@
 # Codeck Refactor Plan — Monorepo + Daemon/Runtime (Gateway Mode)
 
-Este documento define el plan completo de refactorización.
-Es la fuente de verdad técnica.
-
-El agente debe:
-- Leer este archivo en cada iteración.
-- Ejecutar SOLO un bloque de tareas por corrida.
-- Marcar los checkboxes completados.
-- Registrar decisiones en REFRACTOR_LOG.md.
-- Trabajar únicamente en la rama de refactor.
+> **COMPLETADO** — Todos los milestones (0-7) están implementados. Este documento es histórico.
+> La terminología fue actualizada post-refactor: `local` → `isolated`, `gateway` → `managed`.
+> La fuente de verdad actual es `docs/ARCHITECTURE.md`.
 
 ---
 
-# MODOS SOPORTADOS
+# MODOS SOPORTADOS (terminología histórica — ver ARCHITECTURE.md para nombres actuales)
 
-## local
+## local → ahora llamado "isolated"
 - Todo corre en un contenedor.
 - Runtime sirve la webapp.
 - Browser → runtime directamente.
 
-## gateway
+## gateway → ahora llamado "managed"
 - nginx → daemon:8080
 - daemon → runtime (docker network privada)
 - runtime NO está expuesto.

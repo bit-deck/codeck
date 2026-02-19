@@ -9,6 +9,26 @@ Codeck supports two deployment modes. Both work on Linux, macOS, and Windows.
 
 ---
 
+## CLI Reference
+
+All commands are available after `npm run build:cli` and linking globally (`npm link -w @codeck/cli`).
+
+| Command | Description |
+|---------|-------------|
+| `codeck init` | Interactive setup wizard. Detects OS and Docker, selects mode (isolated/managed), configures port, extra ports, tokens, and builds the base image. |
+| `codeck start` | Start Codeck. In isolated mode: brings up the Docker container. In managed mode: starts the container then runs the daemon in foreground (`Ctrl+C` to stop both). |
+| `codeck stop` | Stop the runtime container (and daemon, if managed mode used `Ctrl+C`). |
+| `codeck restart` | Equivalent to `stop` then `start`. |
+| `codeck status` | Show container status, configured mode, port, and LAN config. |
+| `codeck logs` | Stream runtime container logs (`docker compose logs -f`). |
+| `codeck open` | Open the Codeck webapp in the default browser. |
+| `codeck doctor` | Diagnose common configuration issues (Docker running, base image built, ports available, config valid). |
+| `codeck lan start` | Start the mDNS advertiser for LAN access (`codeck.local`). macOS/Windows only. Requires admin/UAC. |
+| `codeck lan stop` | Stop the advertiser and remove Codeck entries from the hosts file. |
+| `codeck lan status` | Check if the mDNS advertiser is running. |
+
+---
+
 ## Isolated Mode
 
 Single container running the runtime with the webapp. No daemon, no Docker socket. Simple and secure.
@@ -58,7 +78,25 @@ The daemon runs natively on the host (serves web UI, handles auth, port exposure
 codeck init       # Choose "Managed" mode
 codeck start      # Starts runtime container + daemon in foreground (Ctrl+C to stop)
 codeck stop       # Stops runtime container (daemon stops via Ctrl+C)
+codeck status     # Container + daemon status
+codeck logs       # Stream runtime container logs
+codeck restart    # Restart container (and daemon if managed)
+codeck doctor     # Diagnose common configuration issues
 ```
+
+#### LAN access (macOS / Windows — managed mode)
+
+On macOS and Windows, `codeck start` offers to enable LAN access automatically. You can also manage it manually:
+
+```bash
+codeck lan start   # Start mDNS advertiser (requires admin/UAC on Windows)
+codeck lan stop    # Stop advertiser and remove codeck.local from hosts file
+codeck lan status  # Check if advertiser is running
+```
+
+The mDNS advertiser makes `codeck.local` and `<port>.codeck.local` resolvable from all devices on the local network. On first run it installs npm dependencies from `scripts/`. On Windows, UAC elevation is required to write the hosts file.
+
+On Linux, LAN access is configured at `codeck init` time via host networking — `codeck lan` is not needed.
 
 ### Linux VPS — systemd service
 

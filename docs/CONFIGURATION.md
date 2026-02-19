@@ -11,8 +11,10 @@
 | `CODECK_PORT` | `80` | Runtime HTTP listening port. In managed mode, set to `7777` (internal). |
 | `CODECK_WS_PORT` | — | **Optional.** Separate WebSocket port. If set and differs from `CODECK_PORT`, creates a dedicated WS server. Required for managed mode (e.g., `7778`). |
 | `CODECK_DAEMON_URL` | — | **Managed mode only.** URL of the host daemon (e.g., `http://host.docker.internal:8080`). When set, runtime delegates port requests to the daemon. |
+| `CODECK_DAEMON_PORT` | — | **Managed mode only.** Daemon port. Used by the runtime to redirect direct browser access to the correct daemon URL. Set automatically by the CLI. |
+| `CODECK_INTERNAL_SECRET` | — | **Managed mode only.** Shared secret between daemon and runtime. The daemon adds `X-Codeck-Internal: <secret>` to all proxied requests; the runtime uses it to bypass auth middleware and redirect direct browser access. Generated fresh on every boot (never stored on disk). Set automatically by the CLI or `start-managed.sh`. |
 | `WORKSPACE` | `/workspace` | Workspace directory for projects |
-| `CODECK_DIR` | `/workspace/.codeck` | Codeck data directory (auth, config, memory, rules, skills, preferences) |
+| `CODECK_DIR` | `/workspace/.codeck` | Codeck data directory (auth, config, memory, rules, skills, preferences). In managed mode, overridden to the shared bind-mount path (e.g., `/data/.codeck`). |
 | `GITHUB_TOKEN` | — | **Optional.** Token for cloning private repos via HTTPS. Use fine-grained PATs. |
 | `ANTHROPIC_API_KEY` | — | **Optional.** Alternative to OAuth login. Prefer OAuth. |
 | `NODE_ENV` | `production` | Set in Dockerfile |
