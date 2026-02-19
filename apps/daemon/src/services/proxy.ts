@@ -1,0 +1,107 @@
+import { request as httpRequest, IncomingMessage } from 'http';
+import type { Request, Response } from 'express';
+
+// Runtime internal URL — in gateway mode, the runtime is on a private Docker network
+// Default matches the plan: codeck-runtime container on port 7777
+const RUNTIME_URL = process.env.CODECK_RUNTIME_URL || 'http://codeck-runtime:7777';
+const PROXY_TIMEOUT = parseInt(process.env.PROXY_TIMEOUT_MS || '30000', 10);
+
+// Headers that should NOT be forwarded to the runtime
+const HOP_BY_HOP = new Set([
+  'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+  'te', 'trailer', 'transfer-encoding', 'upgrade',
+]);
+
+/**
+ * Proxy an Express request to the runtime.
+ * Strips daemon auth (runtime trusts the daemon), adds X-Forwarded-* headers.
+ */
+export function proxyToRuntime(req: Request, res: Response): void {
+  const target = new URL(req.originalUrl, RUNTIME_URL);
+
+  // Build forwarded headers — strip hop-by-hop and auth
+  const headers: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    const lower = key.toLowerCase();
+    if (HOP_BY_HOP.has(lower)) continue;
+    if (lower === 'authorization') continue; // daemon's token, not runtime's
+    if (lower === 'host') continue; // will be set to runtime host
+    if (value !== undefined) headers[key] = value;
+  }
+
+  // Add proxy headers
+  headers['x-forwarded-for'] = req.ip || '127.0.0.1';
+  headers['x-forwarded-proto'] = req.protocol;
+  headers['x-forwarded-host'] = req.hostname;
+
+  const proxyReq = httpRequest(
+    target.href,
+    {
+      method: req.method,
+      headers,
+      timeout: PROXY_TIMEOUT,
+    },
+    (proxyRes: IncomingMessage) => {
+      // Forward status and headers from runtime → client
+      const resHeaders: Record<string, string | string[]> = {};
+      for (const [key, value] of Object.entries(proxyRes.headers)) {
+        const lower = key.toLowerCase();
+        if (HOP_BY_HOP.has(lower)) continue;
+        if (value !== undefined) resHeaders[key] = value;
+      }
+      res.writeHead(proxyRes.statusCode || 502, resHeaders);
+      proxyRes.pipe(res);
+    },
+  );
+
+  proxyReq.on('error', (err) => {
+    console.error(`[Daemon/Proxy] Error forwarding ${req.method} ${req.originalUrl}: ${err.message}`);
+    if (!res.headersSent) {
+      res.status(502).json({ error: 'Runtime unavailable' });
+    }
+  });
+
+  proxyReq.on('timeout', () => {
+    proxyReq.destroy();
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Runtime timeout' });
+    }
+  });
+
+  // Forward request body
+  // express.json() has already consumed the stream, so we re-serialize req.body
+  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+    const bodyStr = JSON.stringify(req.body);
+    proxyReq.setHeader('content-type', 'application/json');
+    proxyReq.setHeader('content-length', Buffer.byteLength(bodyStr));
+    proxyReq.end(bodyStr);
+  } else {
+    proxyReq.end();
+  }
+}
+
+/** Check if the runtime is reachable. */
+export function checkRuntime(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const target = new URL('/internal/status', RUNTIME_URL);
+    const req = httpRequest(target.href, { method: 'GET', timeout: 3000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk: Buffer) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          resolve(json.status === 'ok');
+        } catch {
+          resolve(false);
+        }
+      });
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+export function getRuntimeUrl(): string {
+  return RUNTIME_URL;
+}

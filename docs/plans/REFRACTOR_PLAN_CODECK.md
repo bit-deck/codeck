@@ -67,7 +67,7 @@ scripts/
 - [x] MILESTONE 0 — PREPARACIÓN (completado)
 - [x] MILESTONE 1 — WEBAPP (completado)
 - [x] MILESTONE 2 — RUNTIME (completado)
-- [ ] MILESTONE 3 — DAEMON (siguiente: 3.5)
+- [ ] MILESTONE 3 — DAEMON (siguiente: 3.6)
 
 ---
 
@@ -150,7 +150,7 @@ DONE cuando:
 - [x] configurable por env
 
 ## 3.5 Proxy HTTP
-- [ ] /api/runtime/* → runtime internal
+- [x] /api/runtime/* → runtime internal
 
 ## 3.6 Proxy WS
 - [ ] Browser WS → daemon → runtime

@@ -8,7 +8,7 @@ Este archivo registra el progreso y decisiones técnicas.
 
 Branch: refactor/daemon-runtime-gateway
 Modo objetivo: local + gateway
-Último bloque completado: MILESTONE 3.4 — Rate Limit
+Último bloque completado: MILESTONE 3.5 — Proxy HTTP
 
 ---
 
@@ -365,6 +365,44 @@ Modo objetivo: local + gateway
 - El brute-force lockout es un mecanismo separado del rate limiter — se complementan pero no se superponen (rate limit = ventana, lockout = threshold acumulativo)
 
 **Smoke test:** `npm run build` — OK (frontend + runtime). `npm run build:daemon` — OK. Startup con `RATE_AUTH_MAX=3`: primeras 3 requests pasan normalmente, 4ta request → 429 `"Too many requests"`. Endpoints públicos no afectados. Shutdown limpio.
+
+---
+
+### Iteración 12 — MILESTONE 3.5: PROXY HTTP
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 3.5 — Proxy HTTP (/api/* → runtime internal)
+
+**Cambios:**
+- Creado `apps/daemon/src/services/proxy.ts` — reverse proxy HTTP al runtime:
+  - `proxyToRuntime(req, res)` — proxea un Express request al runtime, re-serializa `req.body` (consumido por `express.json()`)
+  - Strips hop-by-hop headers, `Authorization` (daemon's token), y `Host`
+  - Agrega `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host`
+  - Timeout configurable via `PROXY_TIMEOUT_MS` (default: 30s)
+  - Manejo de errores: 502 si runtime no disponible, 504 si timeout
+  - `checkRuntime()` — health check async contra `/internal/status` del runtime
+  - `getRuntimeUrl()` — getter para logging
+- Actualizado `apps/daemon/src/server.ts`:
+  - Import de `proxyToRuntime` y `getRuntimeUrl`
+  - Catch-all `app.use('/api', ...)` después de los endpoints daemon-owned — proxea todo `/api/*` que el daemon no maneja
+  - Startup log muestra runtime URL: `[Daemon] Proxying API to <url>`
+
+**Problemas:** Ninguno.
+
+**Decisiones:**
+- URL del runtime configurable via `CODECK_RUNTIME_URL` (default: `http://codeck-runtime:7777` — hostname del container Docker en la red privada `codeck_net`)
+- El proxy strip el header `Authorization` porque el daemon tiene sus propias sesiones — el runtime no entiende los tokens del daemon. En gateway mode, el runtime confiará en la red privada (solo el daemon puede hablarle)
+- La re-serialización de `req.body` es necesaria porque `express.json()` consume el stream al parsear. Esto funciona para toda la API de Codeck que es 100% JSON. File uploads (si se agregan en el futuro) necesitarían un middleware que capture el raw body
+- El proxy catch-all va DESPUÉS de todos los endpoints daemon-owned y ANTES del static files/SPA — así el daemon maneja auth, ui/status, sessions, etc. y todo lo demás va al runtime
+- No se implementa proxy de WebSocket en este milestone — eso es 3.6
+- Se incluyó `checkRuntime()` (health check) como utilidad para futuro uso en `/api/ui/status` (mostrar si runtime está healthy)
+
+**Smoke test:** `npm run build` — OK (frontend + runtime). `npm run build:daemon` — OK. Startup con `CODECK_RUNTIME_URL=http://localhost:9996`:
+- Daemon-owned: `/api/ui/status` → `{"status":"ok","mode":"gateway"}`, `/api/auth/status` → `{"configured":false}`
+- Proxied to runtime: `POST /api/auth/setup` → `{"error":"Password already configured"}` (runtime's 400 response forwarded correctly)
+- SPA catch-all → HTTP 200
+- Startup log: `[Daemon] Proxying API to http://localhost:9996`
+- Shutdown limpio.
 
 ---
 

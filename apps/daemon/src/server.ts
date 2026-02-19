@@ -23,6 +23,7 @@ import {
   recordFailedLogin,
   clearFailedAttempts,
 } from './services/rate-limit.js';
+import { proxyToRuntime, getRuntimeUrl } from './services/proxy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.CODECK_DAEMON_PORT || '8080', 10);
@@ -183,6 +184,12 @@ export async function startDaemon(): Promise<void> {
     res.json({ events: getAuthLog() });
   });
 
+  // ── Proxy: forward all remaining /api/* to runtime ──
+
+  app.use('/api', (req, res) => {
+    proxyToRuntime(req, res);
+  });
+
   // ── Static files & SPA ──
 
   // Serve static web assets (same caching strategy as runtime)
@@ -231,6 +238,7 @@ export async function startDaemon(): Promise<void> {
   server.listen(PORT, () => {
     console.log(`\n[Daemon] Codeck gateway running on :${PORT}`);
     console.log(`[Daemon] Serving web from ${WEB_DIST}`);
+    console.log(`[Daemon] Proxying API to ${getRuntimeUrl()}`);
     console.log('');
   });
 }
