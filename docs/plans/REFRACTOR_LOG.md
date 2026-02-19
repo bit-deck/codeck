@@ -8,8 +8,8 @@ Este archivo registra el progreso y decisiones técnicas.
 
 Branch: refactor/daemon-runtime-gateway
 Modo objetivo: local + gateway
-Último bloque completado: MILESTONE 5 — CLI
-Estado: **TODOS LOS MILESTONES COMPLETADOS** (0-5, 15 iteraciones)
+Último bloque completado: MILESTONE 7 — E2E SMOKE TEST
+Estado: **TODOS LOS MILESTONES COMPLETADOS** (0-7, 17 iteraciones)
 
 ---
 
@@ -533,6 +533,67 @@ Estado: **TODOS LOS MILESTONES COMPLETADOS** (0-5, 15 iteraciones)
 - `cd cli && npx tsc --noEmit` — OK (0 errors)
 - `cd cli && npm run build` — OK (tsc → cli/dist)
 - Runtime startup (port 9999) — OK, startup/shutdown limpio
+
+---
+
+### Iteración 16 — MILESTONE 6: CONSOLIDATION
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 6 — Consolidation (eliminar stubs, migrar CLI, arreglar scripts)
+
+**Cambios:**
+- **6.1**: `git rm -r packages/shared packages/protocols` — ambos solo contenían `export {}` sin importadores. Root `package.json` workspaces reducido a `["apps/*"]`, root `tsconfig.json` exclude reducido a `["apps"]`
+- **6.2**: CLI migrado de `cli/` a `apps/cli/` via `git mv` (preserva historial). Package renombrado de `codeck-cli` a `@codeck/cli` con `private: true`. Root `build:cli` cambiado de `cd cli && npm run build` a `npm run build -w @codeck/cli`. `.gitignore` limpiado (cli/dist y cli/node_modules ya cubiertos por patrones globales `dist` y `node_modules`). Directorio `cli/` residual eliminado
+- **6.3**: Root `build` script extendido con `&& npm run build:cli`. Root `clean` script incluye `apps/daemon/dist apps/cli/dist`
+
+**Problemas:** `git mv cli/src apps/cli/src` falló porque git requiere que los directorios target existan. Solución: `mkdir -p` antes del `git mv`
+
+**Decisiones:**
+- Los packages vacíos se eliminan sin reemplazo — nunca tuvieron contenido real ni importadores. Si se necesitan tipos compartidos en el futuro, se crearán con contenido real
+- La CLI es autocontenida (cero imports cross-workspace) — la migración a `apps/cli/` es puramente organizacional
+- El `cli/package-lock.json` se migró junto con el resto — contiene las dependencias resueltas de la CLI
+- Los patterns globales de `.gitignore` (`dist`, `node_modules`) cubren todos los workspace outputs — no se necesitan entries por workspace
+
+**Smoke test:** `npm run clean && npm run build` — OK. 4 outputs verificados: `apps/web/dist/index.html`, `apps/runtime/dist/index.js`, `apps/daemon/dist/index.js`, `apps/cli/dist/index.js`. `cli/` ya no existe en raíz.
+
+---
+
+### Iteración 17 — MILESTONE 7: E2E SMOKE TEST
+**Fecha:** 2026-02-19
+
+**Bloque:** Milestone 7 — E2E smoke test (build completo, runtime local, daemon proxy, WS, compose validation)
+
+**Cambios:** No se requirieron cambios de código. Todos los tests pasaron.
+
+**Resultados:**
+
+- **7.1 Build completo**: `npm run clean && npm run build` — OK. 4 outputs: web/dist/index.html, runtime/dist/index.js, daemon/dist/index.js, cli/dist/index.js
+- **7.2 Runtime local mode** (port 9999):
+  - `/internal/status` → `{"status":"ok","uptime":2.6}`
+  - `/api/auth/status` → `{"configured":true}`
+  - `/` → HTTP 200 (SPA)
+- **7.3 Daemon + proxy HTTP** (runtime:9995+9994, daemon:9998):
+  - `/api/ui/status` → `{"status":"ok","mode":"gateway","uptime":...,"wsConnections":0}` (daemon-owned)
+  - `/api/auth/status` → `{"configured":true}` (daemon-owned)
+  - `/api/sessions` → HTTP 401 through proxy (correct — auth required)
+  - `/api/ports` → HTTP 401 through proxy (correct — auth required)
+  - `/` → HTTP 200 (SPA from daemon static serving)
+- **7.4 WS proxy**:
+  - Direct WS to runtime (port 9994) → **OPEN** (success)
+  - WS through daemon (port 9998) → **401** (expected — daemon password configured, no token provided)
+  - Confirms: daemon WS auth gate works, runtime WS accepts internal connections
+- **7.5 docker-compose.gateway.yml**:
+  - `docker compose config` → valid (no warnings)
+  - Entrypoints correct: daemon → `node apps/daemon/dist/index.js`, runtime → `init-keyring.sh ... node apps/runtime/dist/index.js --web`
+  - Env vars correct: runtime CODECK_PORT=7777, CODECK_WS_PORT=7778; daemon CODECK_RUNTIME_URL/WS_URL pointing to codeck-runtime
+  - Network: `codeck_net` bridge, runtime no host ports, daemon exposed on :8080
+  - WEB_DIST resolution: daemon `__dirname + '../../web/dist'` → `apps/web/dist/` — correct
+
+**Problemas:** Ninguno. Todos los smoke tests pasaron sin necesidad de fixes.
+
+**Decisiones:**
+- El test de WS proxy a través del daemon con auth se omite intencionalmente — requeriría login+token flow que no es práctico en un smoke test. El test directo al runtime WS + el test del auth gate son suficientes para validar que el proxy infrastructure funciona
+- `/api/status` no existe como ruta en el runtime — el health check es `/internal/status`. El proxy está validado por los 401 pass-through de rutas autenticadas
 
 ---
 

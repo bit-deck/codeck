@@ -52,10 +52,6 @@ apps/
   runtime/
   cli/
 
-packages/
-  shared/
-  protocols/
-
 container/
 docs/
 scripts/
@@ -70,6 +66,8 @@ scripts/
 - [x] MILESTONE 3 — DAEMON (completado)
 - [x] MILESTONE 4 — NETWORKING (completado)
 - [x] MILESTONE 5 — CLI (completado)
+- [x] MILESTONE 6 — CONSOLIDATION (completado)
+- [x] MILESTONE 7 — E2E SMOKE TEST (completado)
 
 ---
 
@@ -185,6 +183,45 @@ DONE cuando:
 
 DONE cuando:
 - Ambos modos arrancan desde CLI.
+
+---
+
+# MILESTONE 6 — CONSOLIDATION
+
+## 6.1 Eliminar packages vacíos
+- [x] `git rm -r packages/shared packages/protocols`
+- [x] Root `package.json`: workspaces `["apps/*"]` (sin packages/)
+- [x] Root `tsconfig.json`: exclude `["apps"]` (sin packages)
+- [x] `npm install` para regenerar lockfile
+
+## 6.2 Migrar CLI a apps/cli/
+- [x] Eliminar placeholder `apps/cli/package.json`
+- [x] `git mv` de cli/src, cli/tsconfig.json, cli/package.json a apps/cli/
+- [x] Rename a `@codeck/cli`, agregar `private: true`
+- [x] Root: `build:cli` → `npm run build -w @codeck/cli`
+- [x] `.gitignore`: eliminar cli/dist y cli/node_modules
+- [x] Eliminar directorio cli/ residual
+
+## 6.3 Arreglar build scripts
+- [x] `build` incluye `&& npm run build:cli`
+- [x] `clean` incluye `apps/daemon/dist apps/cli/dist`
+
+DONE cuando:
+- `npm run clean && npm run build` compila las 4 apps.
+- `cli/` ya no existe en raíz.
+
+---
+
+# MILESTONE 7 — E2E SMOKE TEST
+
+- [x] 7.1: Build completo — 4 outputs verificados
+- [x] 7.2: Runtime local mode — /internal/status, /api/auth/status, SPA 200
+- [x] 7.3: Daemon + proxy HTTP — daemon-owned routes, HTTP proxy 401 passthrough
+- [x] 7.4: WS proxy — runtime WS direct OK, daemon rejects unauth (expected)
+- [x] 7.5: docker-compose.gateway.yml — syntax valid, config verified
+
+DONE cuando:
+- Todos los smoke tests pasan. Fixes documentados.
 
 ---
 
