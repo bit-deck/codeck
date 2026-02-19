@@ -47,7 +47,7 @@ export function setAgentBinaryPath(path: string): void {
 }
 
 export function getOAuthEnv(): Record<string, string> {
-  const env: Record<string, string> = { HOME: '/root' };
+  const env: Record<string, string> = {};
 
   // Priority 0: in-memory token (authoritative — survives file deletions)
   const memToken = getInMemoryToken();

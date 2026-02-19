@@ -185,7 +185,7 @@ export function createShellSession(cwd?: string): ConsoleSession {
     throw new Error(`Working directory does not exist: ${workDir}`);
   }
 
-  const finalEnv = { ...buildCleanEnv(), TERM: 'xterm-256color', HOME: '/root' };
+  const finalEnv = { ...buildCleanEnv(), TERM: 'xterm-256color' };
 
   console.log(`[Console] Spawning shell PTY: cwd=${workDir}, sessions=${sessions.size}`);
 
