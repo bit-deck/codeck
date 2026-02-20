@@ -41,6 +41,13 @@ function attachSettleRepaint(sessionId: string): void {
     unsub();
     clearSessionAttaching(sessionId);
     repaintTerminal(sessionId);
+    // If the container was still hidden when repaintTerminal ran (it bails on
+    // offsetHeight=0), retry once the active class has been applied by the
+    // useEffect([activeId]) cycle which runs after sessionList.length effect.
+    const el = document.getElementById('term-' + sessionId);
+    if (el && el.offsetHeight === 0) {
+      setTimeout(() => repaintTerminal(sessionId), 200);
+    }
   };
 }
 
@@ -104,8 +111,16 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
       if (document.getElementById('term-' + s.id)) continue;
 
       const el = document.createElement('div');
-      el.className = 'terminal-instance';
       el.id = 'term-' + s.id;
+      // Set active immediately if this is the active session so fitTerminal
+      // sees a non-zero container height. Without this, the element has
+      // display:none (no .active class) when the rAF fires → offsetHeight=0
+      // → fitTerminal bails → terminal stays at 80×24 default → black screen.
+      el.className = s.id === activeId ? 'terminal-instance active' : 'terminal-instance';
+      // Hide all other instances so only the new active one is visible.
+      if (s.id === activeId) {
+        container.querySelectorAll('.terminal-instance').forEach(c => c.classList.remove('active'));
+      }
       container.appendChild(el);
 
       createTerminal(s.id, el);
