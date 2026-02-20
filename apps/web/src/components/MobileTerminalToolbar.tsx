@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { activeSessionId } from '../state/store';
-import { sendTerminalInput, getTerminalBuffer, scrollToBottom, onTerminalWrite } from '../terminal';
+import { sendTerminalInput, getTerminalBuffer, scrollToBottom, fitTerminal, onTerminalWrite } from '../terminal';
 
 // Escape sequences for special keys
 const SPECIAL_KEYS: Record<string, string> = {
@@ -72,13 +72,15 @@ function recalcLayout(sessionId: string | undefined) {
   instances.style.height = `${available}px`;
   instances.style.maxHeight = `${available}px`;
 
-  // DO NOT call fitTerminal here. The ResizeObserver in terminal.ts handles
-  // fitAddon.fit() + console:resize (debounced 200ms on mobile). Calling
-  // fitTerminal explicitly sends extra SIGWINCH signals to the PTY, which causes
-  // the process to pause-and-redraw → keystrokes dropped → input freeze.
-  // Just scroll to bottom so content is visible while fit is pending.
+  // Call fitTerminal after CSS propagates. The ResizeObserver handles the primary
+  // fit (200ms debounce), but this explicit call ensures the terminal is resized
+  // even if the ResizeObserver doesn't fire (e.g., height didn't change from 0
+  // because the terminal-instance wasn't visible yet). fitTerminal deduplicates
+  // SIGWINCH (only sends console:resize when cols/rows change), so calling both
+  // here and from the ResizeObserver sends at most one resize signal.
   if (sessionId) {
     requestAnimationFrame(() => scrollToBottom(sessionId));
+    setTimeout(() => fitTerminal(sessionId), 250);
   }
 }
 

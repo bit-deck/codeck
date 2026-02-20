@@ -118,6 +118,14 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
       scrollToBottom(activeId);
       focusTerminal(activeId);
     });
+    // Belt-and-suspenders: retry fitTerminal at 100ms and 400ms.
+    // On mobile, recalcLayout may not have set .terminal-instances height by
+    // the time the first rAF fires (~16ms) — the container still reports 0.
+    // fitTerminal deduplicates SIGWINCH (only sends when cols/rows change),
+    // so multiple calls are safe — only the first successful one sends resize.
+    const id = activeId;
+    setTimeout(() => { fitTerminal(id); requestAnimationFrame(() => repaintTerminal(id)); }, 100);
+    setTimeout(() => { fitTerminal(id); requestAnimationFrame(() => repaintTerminal(id)); }, 400);
   }, [activeId]);
 
   function startEditingTab(id: string, currentName: string) {
