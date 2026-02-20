@@ -40,6 +40,7 @@ services:
       - CODECK_DAEMON_PORT=${CODECK_DAEMON_PORT:-8080}
       - WORKSPACE=/workspace
       - CODECK_HOST_WORKSPACE=${CODECK_WORKSPACE:-}
+      - NODE_OPTIONS=--max-old-space-size=${CODECK_NODE_HEAP_MB:-2048}
       - CODECK_UID=${CODECK_UID:-}
       - CODECK_GID=${CODECK_GID:-}
     cap_drop:
@@ -59,8 +60,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 7G
-          cpus: '4.0'
+          memory: ${CODECK_MEMORY_LIMIT:-4G}
+          cpus: '${CODECK_CPU_LIMIT:-2.0}'
           pids: 512
         reservations:
           memory: 512M
