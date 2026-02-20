@@ -26,7 +26,7 @@ import {
 import { proxyToRuntime, getRuntimeUrl } from './services/proxy.js';
 import { handleWsUpgrade, shutdownWsProxy, getWsConnectionCount, getRuntimeWsUrl } from './services/ws-proxy.js';
 import {
-  initDaemonPortManager, addPort, removePort, getMappedPorts, isPortExposed, isPortManagerEnabled,
+  initDaemonPortManager, addPort, removePort, getMappedPorts, isPortExposed, isPortManagerEnabled, restartRuntimeContainer,
 } from './services/port-manager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -239,6 +239,24 @@ export async function startDaemon(): Promise<void> {
     } else {
       res.status(500).json(result);
     }
+  });
+
+  // Restart the runtime container — used by the runtime for self-deploy.
+  // The daemon owns this operation: the runtime stays isolated and can only
+  // trigger host-level actions through controlled daemon endpoints like this one.
+  app.post('/api/system/restart', (_req, res) => {
+    if (!isPortManagerEnabled()) {
+      return proxyToRuntime(_req, res);
+    }
+    // Respond before restarting so the browser receives the confirmation.
+    res.json({ success: true, restarting: true });
+    setTimeout(() => {
+      try {
+        restartRuntimeContainer();
+      } catch (e) {
+        console.error('[Daemon] Restart failed:', (e as Error).message);
+      }
+    }, 500);
   });
 
   app.post('/api/system/remove-port', (req, res) => {

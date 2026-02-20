@@ -130,7 +130,7 @@ function writeOverride(): void {
   console.log(`[Daemon/PortManager] Wrote override: extra ports=[${extraPorts.join(',')}]`);
 }
 
-function restartRuntimeContainer(): void {
+export function restartRuntimeContainer(): void {
   try {
     execFileSync('docker', [
       'compose', '-f', COMPOSE_FILE, 'up', '-d', '--no-deps', 'runtime',

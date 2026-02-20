@@ -172,6 +172,38 @@ router.post('/remove-port', async (req, res) => {
   }
 });
 
+// POST /api/system/restart — restart the runtime container via the daemon.
+// In managed mode the runtime is isolated: host-level restarts must go through
+// the daemon (which owns Docker lifecycle). This preserves the security boundary
+// where the runtime cannot execute arbitrary host commands.
+router.post('/restart', async (req, res) => {
+  if (DAEMON_URL) {
+    // Managed mode: save sessions so they restore after restart, then delegate.
+    saveSessionState('restart', 'Container restarting. Sessions will be restored automatically.');
+    try {
+      const result = await delegateToDaemon('POST', '/api/system/restart', null);
+      res.status(result.status).json(result.data);
+    } catch (e) {
+      console.error('[System] Daemon restart delegation failed:', (e as Error).message);
+      res.status(502).json({ success: false, error: 'Could not reach daemon for restart' });
+    }
+    return;
+  }
+
+  // Isolated mode: use compose restart if Docker socket is available.
+  if (!canAutoRestart()) {
+    res.status(501).json({ success: false, error: 'Restart requires managed mode or a Docker socket' });
+    return;
+  }
+  saveSessionState('restart', 'Container restarting. Sessions will be restored automatically.');
+  res.json({ success: true, restarting: true });
+  setTimeout(() => {
+    try { spawnComposeRestart(); } catch (e) {
+      console.error('[System] Failed to spawn restart:', (e as Error).message);
+    }
+  }, 500);
+});
+
 // POST /api/system/update-agent — safely update the agent CLI binary
 router.post('/update-agent', (_req, res) => {
   try {

@@ -173,6 +173,13 @@ export function addSession(s: TerminalSession): void {
 }
 
 export function setSessions(list: TerminalSession[]): void {
+  // Skip update if sessions are identical — avoids spurious re-renders from
+  // routine status broadcasts (auth monitor fires every 15s with same data).
+  const cur = sessions.value;
+  const same = cur.length === list.length &&
+    cur.every((s, i) => s.id === list[i].id && s.name === list[i].name && s.cwd === list[i].cwd);
+  if (same) return;
+
   sessions.value = list;
   // If active session is gone, switch to first available
   if (activeSessionId.value && !list.find(s => s.id === activeSessionId.value)) {
