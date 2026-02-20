@@ -94,7 +94,10 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
     wsSend({ type: 'console:input', sessionId, data });
   });
 
-  // Debounce resize to avoid excessive events on mobile orientation changes
+  // Debounce resize to avoid excessive events on mobile orientation changes.
+  // On mobile this is the ONLY place fitAddon.fit() is called — recalcLayout
+  // intentionally skips fitTerminal to prevent multiple SIGWINCH signals (which
+  // cause brief input freezes while the PTY process redraws).
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
   const resizeObserver = new ResizeObserver(() => {
     if (resizeTimer) clearTimeout(resizeTimer);
@@ -102,6 +105,10 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
       if (container.offsetWidth > 0 && container.offsetHeight > 0) {
         fitAddon.fit();
         wsSend({ type: 'console:resize', sessionId, cols: term.cols, rows: term.rows });
+        // After fit, scroll to bottom so content is visible (fit may change row count).
+        if (isMobile.value && !scrollLocked.get(sessionId)) {
+          term.scrollToBottom();
+        }
       }
     }, isMobile.value ? 200 : 50);
   });
@@ -132,8 +139,16 @@ export function fitTerminal(sessionId: string): void {
   // Don't fit against a hidden container — FitAddon gets 0-size dimensions
   // and would send incorrect cols/rows to the PTY (display:none → offsetWidth=0).
   if (instance.container.offsetWidth === 0 || instance.container.offsetHeight === 0) return;
+  const prevCols = instance.term.cols;
+  const prevRows = instance.term.rows;
   instance.fitAddon.fit();
-  wsSend({ type: 'console:resize', sessionId, cols: instance.term.cols, rows: instance.term.rows });
+  // Only send console:resize if dimensions actually changed — avoids sending
+  // SIGWINCH to the running process when the terminal size is already correct.
+  // This prevents unnecessary process redraws (and brief input freezes) when
+  // fitTerminal is called redundantly on WS reconnect, section switch, etc.
+  if (instance.term.cols !== prevCols || instance.term.rows !== prevRows) {
+    wsSend({ type: 'console:resize', sessionId, cols: instance.term.cols, rows: instance.term.rows });
+  }
 }
 
 /** Returns the current terminal dimensions, or null if not found / hidden. */

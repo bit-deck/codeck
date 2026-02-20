@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { activeSessionId } from '../state/store';
-import { sendTerminalInput, getTerminalBuffer, scrollToBottom, fitTerminal, onTerminalWrite } from '../terminal';
+import { sendTerminalInput, getTerminalBuffer, scrollToBottom, onTerminalWrite } from '../terminal';
 
 // Escape sequences for special keys
 const SPECIAL_KEYS: Record<string, string> = {
@@ -72,12 +72,13 @@ function recalcLayout(sessionId: string | undefined) {
   instances.style.height = `${available}px`;
   instances.style.maxHeight = `${available}px`;
 
-  // Refit xterm to the new size and scroll to bottom
+  // DO NOT call fitTerminal here. The ResizeObserver in terminal.ts handles
+  // fitAddon.fit() + console:resize (debounced 200ms on mobile). Calling
+  // fitTerminal explicitly sends extra SIGWINCH signals to the PTY, which causes
+  // the process to pause-and-redraw → keystrokes dropped → input freeze.
+  // Just scroll to bottom so content is visible while fit is pending.
   if (sessionId) {
-    requestAnimationFrame(() => {
-      fitTerminal(sessionId);
-      scrollToBottom(sessionId);
-    });
+    requestAnimationFrame(() => scrollToBottom(sessionId));
   }
 }
 
@@ -224,18 +225,27 @@ export function MobileTerminalToolbar() {
     const lines = getTerminalBuffer(sessionId);
     setAdaptiveMode(YN_PATTERN.test(lines.join('\n')) ? 'yesno' : 'default');
 
-    // Subscribe to incoming terminal data for real-time detection
+    // Throttle buffer reads: getTerminalBuffer() iterates xterm's line buffer and
+    // runs synchronously in the WS onmessage handler. During heavy streaming output,
+    // calling it on every newline saturates the main thread and causes input freezes.
+    let bufferCheckTimer: ReturnType<typeof setTimeout> | null = null;
+
     return onTerminalWrite((sid, data) => {
       if (sid !== sessionId) return;
-      // Check incoming data chunk first (fast path)
+      // Check incoming data chunk first (fast path — no buffer read needed)
       if (YN_PATTERN.test(data)) {
+        if (bufferCheckTimer) { clearTimeout(bufferCheckTimer); bufferCheckTimer = null; }
         setAdaptiveMode('yesno');
         return;
       }
-      // On newline/enter, re-check buffer (prompt may have been answered)
+      // On newline/enter, re-check buffer — but throttle to avoid main-thread pressure.
       if (data.includes('\r') || data.includes('\n')) {
-        const current = getTerminalBuffer(sessionId);
-        setAdaptiveMode(YN_PATTERN.test(current.join('\n')) ? 'yesno' : 'default');
+        if (bufferCheckTimer) return; // already scheduled
+        bufferCheckTimer = setTimeout(() => {
+          bufferCheckTimer = null;
+          const current = getTerminalBuffer(sessionId);
+          setAdaptiveMode(YN_PATTERN.test(current.join('\n')) ? 'yesno' : 'default');
+        }, 300);
       }
     });
   }, [sessionId]);
