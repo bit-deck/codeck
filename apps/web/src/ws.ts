@@ -73,16 +73,32 @@ export function setTerminalHandlers(output: OutputHandler, exit: ExitHandler): v
 }
 
 export function wsSend(msg: object): void {
+  const msgType = (msg as any).type;
   if (ws && ws.readyState === WebSocket.OPEN) {
+    // Post-reconnect race guard: WS is OPEN but we're still in the pendingReattach
+    // window (waiting for the first status message before re-attaching sessions).
+    // During this window, console:input sent directly would arrive at the server
+    // BEFORE console:attach — the server writes to the PTY but this client is not
+    // yet registered in sessionClients → PTY echo has no recipient → input lost.
+    // Fix: buffer console:input during this window; attachSession flushes after attach.
+    if (pendingReattach && msgType === 'console:input') {
+      const sid = (msg as any).sessionId;
+      if (typeof sid === 'string') {
+        const arr = pendingInputs.get(sid) ?? [];
+        if (!pendingInputs.has(sid)) pendingInputs.set(sid, arr);
+        if (arr.length < MAX_PENDING_INPUTS) arr.push(msg);
+      }
+      return;
+    }
     ws.send(JSON.stringify(msg));
-  } else if ((msg as any).type === 'console:resize') {
+  } else if (msgType === 'console:resize') {
     // Buffer resize per session — replaces any previous buffered resize for
     // this session. On reconnect, all sessions get their dimensions flushed.
     const sessionId = (msg as any).sessionId;
     if (typeof sessionId === 'string') {
       pendingResizes.set(sessionId, msg);
     }
-  } else if ((msg as any).type === 'console:input') {
+  } else if (msgType === 'console:input') {
     // Buffer input so keystrokes typed during a brief disconnect aren't lost.
     const sid = (msg as any).sessionId;
     if (typeof sid === 'string') {
@@ -113,6 +129,7 @@ export function attachSession(sessionId: string): void {
   const pending = pendingInputs.get(sessionId);
   if (pending && pending.length > 0) {
     pendingInputs.delete(sessionId);
+    addLog({ type: 'info', message: `[WS] Flushing ${pending.length} buffered input(s) for session ${sessionId.slice(0, 8)}`, timestamp: Date.now() });
     setTimeout(() => {
       for (const msg of pending) wsSend(msg);
     }, 100);

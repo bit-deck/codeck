@@ -176,7 +176,15 @@ export function repaintTerminal(sessionId: string): void {
   const { cols, rows } = instance.term;
   instance.term.resize(cols, rows + 1);
   instance.term.resize(cols, rows);
-  if (!scrollLocked.get(sessionId)) instance.term.scrollToBottom();
+  if (!scrollLocked.get(sessionId)) {
+    instance.term.scrollToBottom();
+    // Also force DOM scrollTop directly — term.scrollToBottom() updates xterm's
+    // virtual buffer pointer but the DOM .xterm-viewport scrollTop can be stale
+    // (e.g., was set to 0 while the container was display:none during buffer replay).
+    // Direct DOM manipulation is the only reliable way to fix this.
+    const viewport = instance.container.querySelector('.xterm-viewport') as HTMLElement | null;
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  }
   instance.term.refresh(0, rows - 1);
 }
 
