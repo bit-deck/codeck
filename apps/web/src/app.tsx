@@ -10,7 +10,7 @@ import {
 } from './state/store';
 import { apiFetch, getAuthToken, clearAuthToken } from './api';
 import { connectWebSocket } from './ws';
-import { fitTerminal } from './terminal';
+import { fitTerminal, scrollToBottom } from './terminal';
 import { LoadingView } from './components/LoadingView';
 import { AuthView } from './components/AuthView';
 import { SetupView } from './components/SetupView';
@@ -289,7 +289,7 @@ export function App() {
     setActiveSection(s);
     if (s === 'claude') {
       const active = activeSessionId.value;
-      if (active) setTimeout(() => fitTerminal(active), 50);
+      if (active) setTimeout(() => { fitTerminal(active); scrollToBottom(active); }, 50);
     }
   }
 
@@ -418,7 +418,13 @@ export function App() {
           <ErrorBoundary>
             {section === 'home' && <HomeSection onRelogin={startLogin} />}
             {section === 'filesystem' && <FilesSection />}
-            {section === 'claude' && <ClaudeSection onNewSession={handleNewSession} onNewShell={handleNewShell} />}
+            {/* ClaudeSection is always mounted — never unmount it.
+                Unmounting destroys xterm instances (expensive WebGL teardown + init on remount,
+                causes 5-10s input freeze) and loses the attach state (black terminal on return).
+                CSS display:none/contents hides/shows it without touching the DOM tree. */}
+            <div style={section !== 'claude' ? { display: 'none' } : { display: 'contents' }}>
+              <ClaudeSection onNewSession={handleNewSession} onNewShell={handleNewShell} />
+            </div>
 
             {section === 'agents' && <AgentsSection />}
             {section === 'integrations' && <IntegrationsSection />}

@@ -175,12 +175,16 @@ export function writeToTerminal(sessionId: string, data: string): void {
     return;
   }
 
-  // Not scroll-locked: write and always follow the output to the bottom.
-  // This covers both normal use (user at bottom) and PTY buffer replay on
-  // session restore (viewport starts at 0 while baseY grows — without this
-  // explicit scroll the terminal appears black until the user presses Enter).
-  instance.term.write(sanitized);
-  instance.term.scrollToBottom();
+  // Not scroll-locked: write and follow output to the bottom.
+  // IMPORTANT: term.write() is async (xterm queues writes internally). Calling
+  // scrollToBottom() synchronously after write() doesn't work — the content isn't
+  // in the buffer yet, so the viewport stays at the wrong position (black screen).
+  // The callback fires after xterm actually processes and renders the data.
+  instance.term.write(sanitized, () => {
+    // Re-check lock inside the callback: the user may have scrolled up between
+    // the write() call and this callback — respect that intent.
+    if (!scrollLocked.get(sessionId)) instance.term.scrollToBottom();
+  });
 }
 
 export function focusTerminal(sessionId: string): void {
