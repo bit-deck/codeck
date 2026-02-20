@@ -35,10 +35,9 @@ EXPOSE 80
 # NODE_ENV is NOT set globally — user dev servers need NODE_ENV=development.
 # Our process sets it inline via the entrypoint.
 ENV WORKSPACE=/workspace
-# Limit V8 heap to 50% of container memory (2GB of 4GB limit).
+# Limit V8 heap to ~50% of container memory (3.5GB of 7GB limit).
 # Ensures headroom for PTY buffers, dev servers, tmpfs, and OS overhead.
-# If you increase the container memory limit, increase this proportionally.
-ENV NODE_OPTIONS="--max-old-space-size=2048"
+ENV NODE_OPTIONS="--max-old-space-size=3584"
 
 ENTRYPOINT ["/usr/local/bin/init-keyring.sh", "env", "NODE_ENV=production", "node", "apps/runtime/dist/index.js"]
 CMD ["--web"]

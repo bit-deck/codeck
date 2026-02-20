@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { existsSync, writeFileSync, mkdirSync, readFileSync, chmodSync, statSync, unlinkSync, copyFileSync, watch } from 'fs';
+import { existsSync, writeFileSync, mkdirSync, readFileSync, chmodSync, statSync, unlinkSync, watch } from 'fs';
 import { randomBytes, createHash, scryptSync, createCipheriv, createDecipheriv } from 'crypto';
 import { join } from 'path';
 import { ACTIVE_AGENT } from './agent.js';
@@ -111,7 +111,9 @@ function getCachedAccountInfo(): AccountInfo | null {
 function backupCredentials(): void {
   try {
     if (existsSync(CLAUDE_CREDENTIALS_PATH)) {
-      copyFileSync(CLAUDE_CREDENTIALS_PATH, CREDENTIALS_BACKUP);
+      // Use read+write instead of copyFileSync — the latter uses copy_file_range()
+      // which fails with EPERM on bind-mounts between different host filesystems.
+      writeFileSync(CREDENTIALS_BACKUP, readFileSync(CLAUDE_CREDENTIALS_PATH), { mode: 0o600 });
     }
   } catch (e) {
     console.warn('[Claude] Failed to backup credentials:', (e as Error).message);
@@ -123,7 +125,7 @@ function restoreCredentials(): boolean {
   if (existsSync(CLAUDE_CREDENTIALS_PATH)) return false;
   if (!existsSync(CREDENTIALS_BACKUP)) return false;
   try {
-    copyFileSync(CREDENTIALS_BACKUP, CLAUDE_CREDENTIALS_PATH);
+    writeFileSync(CLAUDE_CREDENTIALS_PATH, readFileSync(CREDENTIALS_BACKUP), { mode: 0o600 });
     console.log('[Claude] Restored .credentials.json from backup');
     return true;
   } catch (e) {
@@ -150,7 +152,7 @@ try {
               console.log(`[Claude] WATCH: .credentials.json confirmed DELETED — ${new Date().toISOString()}`);
               if (existsSync(CREDENTIALS_BACKUP)) {
                 try {
-                  copyFileSync(CREDENTIALS_BACKUP, CLAUDE_CREDENTIALS_PATH);
+                  writeFileSync(CLAUDE_CREDENTIALS_PATH, readFileSync(CREDENTIALS_BACKUP), { mode: 0o600 });
                   console.log('[Claude] WATCH: auto-restored credentials from backup');
                 } catch (e) {
                   console.error('[Claude] WATCH: auto-restore failed:', (e as Error).message);
@@ -163,7 +165,7 @@ try {
           try {
             const raw = JSON.parse(readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8'));
             if (raw.version === 2) {
-              copyFileSync(CLAUDE_CREDENTIALS_PATH, CREDENTIALS_BACKUP);
+              writeFileSync(CREDENTIALS_BACKUP, readFileSync(CLAUDE_CREDENTIALS_PATH), { mode: 0o600 });
             }
           } catch { /* ignore */ }
         }
