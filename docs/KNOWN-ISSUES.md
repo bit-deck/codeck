@@ -82,7 +82,15 @@ PTY sessions keep running when WS client disconnects. No auto-cleanup timeout fo
 
 `appendFileSync()` blocks during disk I/O. Negligible on fast disks, problematic on NFS/SMB.
 
-### 14. No backup/restore verification
+### 14. Runtime port-manager is legacy code
+
+**File:** `apps/runtime/src/services/port-manager.ts`
+
+In **managed mode**, port exposure is handled by the daemon — the runtime's port-manager is bypassed. In **isolated mode**, the port-manager requires the Docker socket to be mounted (commented out by default in `compose.isolated.yml` for security). Without the socket, the port-manager silently does nothing.
+
+**Plan:** Replace with a daemon endpoint (`POST /api/system/add-port`) that the runtime can call over the internal network. The daemon then updates `compose.override.yml` and restarts the runtime container — all from outside the container boundary. Until that endpoint is implemented, port exposure in isolated mode requires manual Docker socket mounting.
+
+### 15. No backup/restore verification
 
 Workspace export (`GET /api/workspace/export`) creates `.tar.gz` but has no checksum, no restore testing, no schema migration.
 

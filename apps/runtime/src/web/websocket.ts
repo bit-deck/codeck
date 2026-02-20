@@ -5,7 +5,7 @@ import { ACTIVE_AGENT } from '../services/agent.js';
 import { getGitStatus, getWorkspacePath } from '../services/git.js';
 import { getSession, writeToSession, resizeSession, destroySession, markSessionAttached, listSessions, hasSavedSessions } from '../services/console.js';
 import { getLogBuffer, setWsClients, broadcast } from './logger.js';
-import { isPasswordConfigured, validateSession } from '../services/auth.js';
+import { isPasswordConfigured, validateSession, consumeWsTicket } from '../services/auth.js';
 import { detectDockerSocketMount } from '../services/environment.js';
 import type { Socket } from 'net';
 
@@ -90,8 +90,12 @@ export function setupWebSocket(): void {
       const isTrustedProxy = INTERNAL_SECRET && internalParam === INTERNAL_SECRET;
 
       if (!isTrustedProxy) {
+        const ticket = url.searchParams.get('ticket');
         const token = url.searchParams.get('token');
-        if (!token || !validateSession(token)) {
+
+        // Prefer one-time ticket (short-lived, consumed on use — avoids long-lived token in URL)
+        const authorized = ticket ? consumeWsTicket(ticket) : (!!token && validateSession(token));
+        if (!authorized) {
           ws.close(4001, 'Unauthorized');
           return;
         }

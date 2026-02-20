@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, appendFileSync, statSync, chmodSync, renameSync } from 'fs';
-import { resolve, join } from 'path';
+import { resolve, join, isAbsolute } from 'path';
 import { randomUUID } from 'crypto';
 import { stripVTControlCharacters } from 'util';
 import cron from 'node-cron';
@@ -667,6 +667,28 @@ export function lintAgentObjective(objective: string): ObjectiveLintWarning[] {
   return warnings;
 }
 
+// ── Validation ──
+
+/**
+ * Validates that a cwd path is safe and within the workspace.
+ * Prevents path traversal and execution outside workspace boundaries.
+ */
+function validateAgentCwd(cwd: string): void {
+  if (!cwd || typeof cwd !== 'string') throw new Error('Working directory is required');
+  if (!isAbsolute(cwd)) throw new Error('Working directory must be an absolute path');
+  if (cwd.includes('\0')) throw new Error('Working directory must not contain null bytes');
+  if (cwd.length > 500) throw new Error('Working directory path too long (max 500 chars)');
+
+  const normalized = resolve(cwd);
+  const workspace = process.env.WORKSPACE || '/workspace';
+  const allowedBases = [workspace, '/home/codeck/workspace'];
+
+  const allowed = allowedBases.some(base => normalized === base || normalized.startsWith(base + '/'));
+  if (!allowed) {
+    throw new Error(`Working directory must be within workspace (${workspace}). Got: ${normalized}`);
+  }
+}
+
 // ── Lifecycle ──
 
 function loadManifest(): { version: number; agents: string[] } {
@@ -797,6 +819,7 @@ export function createAgent(input: CreateAgentInput): AgentDetail {
   }
 
   const cwd = input.cwd?.trim() || process.env.WORKSPACE || '/workspace';
+  validateAgentCwd(cwd);
   if (!existsSync(cwd)) {
     throw new Error(`Working directory does not exist: ${cwd}`);
   }
@@ -804,8 +827,12 @@ export function createAgent(input: CreateAgentInput): AgentDetail {
     throw new Error(`Working directory must be a directory, not a file: ${cwd}`);
   }
 
-  // Lint objective for suspicious Docker patterns
+  // Lint objective for suspicious Docker/escape patterns — block high severity
   const lintWarnings = lintAgentObjective(input.objective);
+  const highSeverity = lintWarnings.filter(w => w.severity === 'high');
+  if (highSeverity.length > 0) {
+    throw new Error(`Objective contains dangerous patterns: ${highSeverity.map(w => w.description).join('; ')}`);
+  }
   if (lintWarnings.length > 0) {
     console.warn(`[ProactiveAgents] Agent objective contains suspicious patterns: ${JSON.stringify(lintWarnings)}`);
   }
@@ -885,13 +912,20 @@ export function updateAgent(id: string, updates: Partial<Pick<AgentConfig, 'name
     throw new Error(`Invalid cron expression: ${updates.schedule}`);
   }
 
-  if (updates.cwd && !existsSync(updates.cwd)) {
-    throw new Error(`Working directory does not exist: ${updates.cwd}`);
+  if (updates.cwd) {
+    validateAgentCwd(updates.cwd);
+    if (!existsSync(updates.cwd)) {
+      throw new Error(`Working directory does not exist: ${updates.cwd}`);
+    }
   }
 
-  // Lint updated objective for suspicious Docker patterns
+  // Lint updated objective — block high severity patterns
   if (updates.objective) {
     const lintWarnings = lintAgentObjective(updates.objective);
+    const highSeverity = lintWarnings.filter(w => w.severity === 'high');
+    if (highSeverity.length > 0) {
+      throw new Error(`Objective contains dangerous patterns: ${highSeverity.map(w => w.description).join('; ')}`);
+    }
     if (lintWarnings.length > 0) {
       console.warn(`[ProactiveAgents] Updated objective for agent ${id} contains suspicious patterns: ${JSON.stringify(lintWarnings)}`);
     }

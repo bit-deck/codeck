@@ -72,8 +72,17 @@ fi\n\
 # Initialize D-Bus session\n\
 export $(dbus-launch)\n\
 \n\
-# Initialize keyring with empty password and export control vars\n\
-eval $(echo "" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null)\n\
+# Auto-generate and persist a keyring password (avoids empty-password keyring).\n\
+# Stored in the claude-config volume so it survives container restarts.\n\
+KEYRING_PASS_FILE="/root/.claude/.keyring-pass"\n\
+if [ ! -f "$KEYRING_PASS_FILE" ]; then\n\
+  node -e "process.stdout.write(require('"'"'crypto'"'"').randomBytes(32).toString('"'"'hex'"'"'))" > "$KEYRING_PASS_FILE" 2>/dev/null || true\n\
+  chmod 600 "$KEYRING_PASS_FILE" 2>/dev/null || true\n\
+fi\n\
+KEYRING_PASS=$(cat "$KEYRING_PASS_FILE" 2>/dev/null || echo "")\n\
+\n\
+# Initialize keyring with auto-generated persistent password\n\
+eval $(printf "%s" "$KEYRING_PASS" | gnome-keyring-daemon --unlock --components=secrets 2>/dev/null)\n\
 export GNOME_KEYRING_CONTROL\n\
 export SSH_AUTH_SOCK\n\
 \n\

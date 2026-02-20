@@ -48,6 +48,21 @@ export function proxyToRuntime(req: Request, res: Response): void {
       timeout: PROXY_TIMEOUT,
     },
     (proxyRes: IncomingMessage) => {
+      const status = proxyRes.statusCode || 502;
+
+      // Detect redirect loop: runtime redirecting back to daemon means CODECK_INTERNAL_SECRET
+      // mismatch (daemon restarted with new secret, runtime still has old one).
+      // Returning 503 prevents an infinite proxy loop and surfaces a clear error.
+      if (status >= 300 && status < 400) {
+        const location = proxyRes.headers.location || '';
+        if (location.includes('host.docker.internal') || location.includes('codeck-daemon')) {
+          console.error('[Daemon/Proxy] Secret mismatch detected: runtime redirected back to daemon. Restart runtime to sync secrets.');
+          proxyRes.resume(); // Drain the response body
+          if (!res.headersSent) res.status(503).json({ error: 'Service temporarily unavailable — internal secret mismatch. Restart runtime.' });
+          return;
+        }
+      }
+
       // Forward status and headers from runtime → client
       const resHeaders: Record<string, string | string[]> = {};
       for (const [key, value] of Object.entries(proxyRes.headers)) {
@@ -55,7 +70,7 @@ export function proxyToRuntime(req: Request, res: Response): void {
         if (HOP_BY_HOP.has(lower)) continue;
         if (value !== undefined) resHeaders[key] = value;
       }
-      res.writeHead(proxyRes.statusCode || 502, resHeaders);
+      res.writeHead(status, resHeaders);
       proxyRes.pipe(res);
     },
   );

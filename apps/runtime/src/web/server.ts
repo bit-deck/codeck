@@ -8,7 +8,7 @@ import v8 from 'v8';
 import { installLogInterceptor, getLogBuffer, broadcast } from './logger.js';
 import { setupWebSocket, handleWsUpgrade } from './websocket.js';
 import { setupInternalPty, handlePtyUpgrade } from './internal-pty.js';
-import { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, changePassword, getActiveSessions, revokeSessionById, getAuthLog } from '../services/auth.js';
+import { isPasswordConfigured, setupPassword, validatePassword, validateSession, invalidateSession, changePassword, getActiveSessions, revokeSessionById, getAuthLog, loadLockouts, saveLockouts, createWsTicket, type LockoutEntry } from '../services/auth.js';
 import { getClaudeStatus, isClaudeAuthenticated, getAccountInfo, startTokenRefreshMonitor, stopTokenRefreshMonitor } from '../services/auth-anthropic.js';
 import { ACTIVE_AGENT } from '../services/agent.js';
 import { getGitStatus, updateClaudeMd, initGitHub } from '../services/git.js';
@@ -166,9 +166,10 @@ export async function startWebServer(): Promise<void> {
   app.use('/api', createRateLimiter(200));
 
   // Account lockout (brute-force protection beyond rate limiting)
+  // Persisted to disk so restarts don't reset lockouts mid-attack.
   const MAX_FAILED_ATTEMPTS = 5;
   const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
-  const failedAttempts = new Map<string, { count: number; lockedUntil: number }>();
+  const failedAttempts: Map<string, LockoutEntry> = loadLockouts();
 
   function checkLockout(ip: string): { locked: boolean; retryAfter?: number } {
     const entry = failedAttempts.get(ip);
@@ -188,10 +189,12 @@ export async function startWebServer(): Promise<void> {
       entry.count = 0;
     }
     failedAttempts.set(ip, entry);
+    saveLockouts(failedAttempts);
   }
 
   function clearFailedAttempts(ip: string): void {
     failedAttempts.delete(ip);
+    saveLockouts(failedAttempts);
   }
 
   // Auth Endpoints (public, before middleware)
@@ -223,6 +226,16 @@ export async function startWebServer(): Promise<void> {
       res.status(401).json({ success: false, error: 'Incorrect password' });
     }
   });
+  // WS ticket endpoint — exchange a session token for a short-lived one-time ticket.
+  // The ticket is used in the WebSocket URL instead of the session token,
+  // avoiding long-lived tokens appearing in proxy logs and browser history.
+  app.post('/api/auth/ws-ticket', (req, res) => {
+    if (!isPasswordConfigured()) { res.json({ ticket: null }); return; }
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token || !validateSession(token)) { res.status(401).json({ error: 'Unauthorized', needsAuth: true }); return; }
+    res.json({ ticket: createWsTicket() });
+  });
+
   // Auth Middleware (protects all /api/* below)
   const INTERNAL_SECRET = process.env.CODECK_INTERNAL_SECRET || '';
 

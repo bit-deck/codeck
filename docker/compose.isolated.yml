@@ -30,7 +30,8 @@ services:
       - SETGID          # Group switching (dbus, keyring)
       - NET_BIND_SERVICE # Bind to ports < 1024
       - KILL            # Signal processes (dev server cleanup)
-      - DAC_OVERRIDE    # File permission overrides (gnome-keyring, dbus, ssh)
+      # DAC_OVERRIDE removed: container runs as root, which owns all its files.
+      # Root does not need DAC_OVERRIDE when cap_drop: ALL is in effect for its own files.
     security_opt:
       - no-new-privileges:true
     deploy:

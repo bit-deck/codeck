@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync, copyFileSync, rmSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, copyFileSync, rmSync, appendFileSync } from 'fs';
 import { scrypt, createHash, randomBytes, randomUUID, timingSafeEqual, ScryptOptions } from 'crypto';
 import { join, dirname } from 'path';
 import { atomicWriteFileSync } from './memory.js';
@@ -154,10 +154,76 @@ export interface AuthLogEntry {
 
 const authLog: AuthLogEntry[] = [];
 const MAX_AUTH_LOG = 200;
+const AUDIT_FILE = join(CODECK_DIR, 'auth-audit.log');
 
 function logAuthEvent(type: AuthLogEntry['type'], ip: string): void {
-  authLog.push({ type, ip, timestamp: Date.now() });
+  const entry: AuthLogEntry = { type, ip, timestamp: Date.now() };
+  authLog.push(entry);
   if (authLog.length > MAX_AUTH_LOG) authLog.shift();
+
+  // Persist to append-only audit log on disk (visible in isolated mode too)
+  try {
+    appendFileSync(AUDIT_FILE, JSON.stringify(entry) + '\n');
+  } catch { /* non-fatal */ }
+}
+
+// ============ LOCKOUT PERSISTENCE ============
+// Lockout state is owned by server.ts but persisted here alongside other auth state.
+
+export interface LockoutEntry { count: number; lockedUntil: number; }
+const LOCKOUT_FILE = join(CODECK_DIR, '.lockouts.json');
+
+export function loadLockouts(): Map<string, LockoutEntry> {
+  const result = new Map<string, LockoutEntry>();
+  try {
+    if (!existsSync(LOCKOUT_FILE)) return result;
+    const data: Record<string, LockoutEntry> = JSON.parse(readFileSync(LOCKOUT_FILE, 'utf-8'));
+    const now = Date.now();
+    for (const [ip, entry] of Object.entries(data)) {
+      if (typeof entry.count === 'number' && typeof entry.lockedUntil === 'number') {
+        if (entry.lockedUntil > now || entry.count > 0) result.set(ip, entry);
+      }
+    }
+  } catch { /* non-fatal */ }
+  return result;
+}
+
+export function saveLockouts(lockouts: Map<string, LockoutEntry>): void {
+  try {
+    const data: Record<string, LockoutEntry> = {};
+    const now = Date.now();
+    for (const [ip, entry] of lockouts) {
+      if (entry.lockedUntil > now || entry.count > 0) data[ip] = entry;
+    }
+    atomicWriteFileSync(LOCKOUT_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+  } catch { /* non-fatal */ }
+}
+
+// ============ WS TICKET STORE ============
+// Short-lived one-time tickets for WebSocket upgrade — avoids session tokens in query string.
+
+const wsTickets = new Map<string, { expiresAt: number }>();
+const WS_TICKET_TTL_MS = 30_000; // 30 seconds — enough for the WS upgrade handshake
+
+// Purge expired tickets every minute
+setInterval(() => {
+  const now = Date.now();
+  for (const [ticket, data] of wsTickets) {
+    if (data.expiresAt < now) wsTickets.delete(ticket);
+  }
+}, 60_000);
+
+export function createWsTicket(): string {
+  const ticket = randomBytes(32).toString('hex');
+  wsTickets.set(ticket, { expiresAt: Date.now() + WS_TICKET_TTL_MS });
+  return ticket;
+}
+
+export function consumeWsTicket(ticket: string): boolean {
+  const data = wsTickets.get(ticket);
+  if (!data || Date.now() > data.expiresAt) return false;
+  wsTickets.delete(ticket); // One-time use
+  return true;
 }
 
 // ============ AUTH CONFIG ============

@@ -77,12 +77,7 @@ export function attachSession(sessionId: string): void {
   wsSend({ type: 'console:attach', sessionId });
 }
 
-export function connectWebSocket(): void {
-  if (ws && ws.readyState !== WebSocket.CLOSED) return;
-
-  const token = getAuthToken();
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${location.host}${token ? '?token=' + encodeURIComponent(token) : ''}`;
+function openWs(wsUrl: string): void {
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
@@ -232,6 +227,31 @@ export function connectWebSocket(): void {
   };
 
   ws.onerror = () => ws?.close();
+}
+
+export function connectWebSocket(): void {
+  if (ws && ws.readyState !== WebSocket.CLOSED) return;
+
+  const token = getAuthToken();
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+  if (!token) {
+    openWs(`${protocol}//${location.host}`);
+    return;
+  }
+
+  // Exchange session token for a one-time short-lived ticket.
+  // Avoids long-lived tokens appearing in proxy logs and browser history.
+  // Falls back to ?token= if the ticket endpoint is unavailable.
+  fetch('/api/auth/ws-ticket', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      const wsUrl = data?.ticket
+        ? `${protocol}//${location.host}?ticket=${encodeURIComponent(data.ticket)}`
+        : `${protocol}//${location.host}?token=${encodeURIComponent(token)}`;
+      openWs(wsUrl);
+    })
+    .catch(() => openWs(`${protocol}//${location.host}?token=${encodeURIComponent(token)}`));
 }
 
 export function disconnectWebSocket(): void {
