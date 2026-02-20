@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile, restoringPending } from '../state/store';
 import { apiFetch } from '../api';
-import { createTerminal, destroyTerminal, fitTerminal, repaintTerminal, focusTerminal, writeToTerminal, scrollToBottom, getTerminal } from '../terminal';
+import { createTerminal, destroyTerminal, fitTerminal, repaintTerminal, focusTerminal, writeToTerminal, scrollToBottom, getTerminal, markSessionAttaching, clearSessionAttaching, onTerminalWrite } from '../terminal';
 import { wsSend, setTerminalHandlers, attachSession, setOnSessionReattached } from '../ws';
 import { IconPlus, IconX, IconShell, IconTerminal } from './Icons';
 import { MobileTerminalToolbar } from './MobileTerminalToolbar';
@@ -9,6 +9,39 @@ import { MobileTerminalToolbar } from './MobileTerminalToolbar';
 interface ClaudeSectionProps {
   onNewSession: () => void;
   onNewShell: () => void;
+}
+
+/**
+ * After markSessionAttaching + attachSession, watch for write events to detect
+ * when the buffer replay settles. Once 500ms of silence passes (or 3s max),
+ * clear the attach guard and repaint so the terminal shows the cursor position.
+ */
+function attachSettleRepaint(sessionId: string): void {
+  const SETTLE_MS = 500;
+  const MAX_WAIT_MS = 3000;
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
+  let completed = false;
+
+  // complete() is assigned after unsub is available to break the circular ref
+  let complete: () => void;
+
+  const unsub = onTerminalWrite((sid) => {
+    if (sid !== sessionId) return;
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => complete(), SETTLE_MS);
+  });
+
+  const maxTimer = setTimeout(() => complete(), MAX_WAIT_MS);
+
+  complete = () => {
+    if (completed) return;
+    completed = true;
+    if (settleTimer) clearTimeout(settleTimer);
+    clearTimeout(maxTimer);
+    unsub();
+    clearSessionAttaching(sessionId);
+    repaintTerminal(sessionId);
+  };
 }
 
 export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) {
@@ -33,8 +66,9 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
       // Fit first, then attach so the server replays at the correct dimensions.
       requestAnimationFrame(() => {
         fitTerminal(sessionId);
+        markSessionAttaching(sessionId);
         attachSession(sessionId);
-        scrollToBottom(sessionId);
+        attachSettleRepaint(sessionId);
         if (sessionId === activeSessionId.value) focusTerminal(sessionId);
       });
     });
@@ -83,13 +117,9 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
       const sid = s.id;
       requestAnimationFrame(() => {
         fitTerminal(sid);
+        markSessionAttaching(sid);
         attachSession(sid);
-        // Repaint after buffer replay settles. The terminal may be hidden (display:none)
-        // during replay if the section isn't 'claude' yet — fitTerminal bails on hidden
-        // containers, leaving xterm at 80x24. repaintTerminal forces syncScrollArea
-        // so the viewport lands at the cursor (bottom) instead of the top (black screen).
-        // 600ms: enough for most buffer replays to complete and the section to become visible.
-        setTimeout(() => repaintTerminal(sid), 600);
+        attachSettleRepaint(sid);
       });
     }
 

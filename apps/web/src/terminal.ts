@@ -17,6 +17,22 @@ const terminals = new Map<string, TerminalInstance>();
 // xterm's internal auto-scroll from yanking them back to the bottom.
 const scrollLocked = new Map<string, boolean>();
 
+// Sessions currently in the attach/replay phase. During buffer replay, xterm
+// updates scrollHeight before scrollTop, causing the scroll listener to set
+// scrollLocked=true spuriously. Suppressing the lock during replay prevents
+// the "black terminal" race where every write restores the wrong (0) scrollTop.
+const attachingSession = new Set<string>();
+
+/** Call before attachSession to suppress spurious scroll lock during replay. */
+export function markSessionAttaching(sessionId: string): void {
+  attachingSession.add(sessionId);
+}
+
+/** Call after replay settles to re-enable scroll lock detection and repaint. */
+export function clearSessionAttaching(sessionId: string): void {
+  attachingSession.delete(sessionId);
+}
+
 // Terminal write subscribers: components can listen for incoming data
 // (e.g., for adaptive prompt detection without polling).
 type WriteListener = (sessionId: string, data: string) => void;
@@ -85,6 +101,11 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
   const xtermViewport = container.querySelector('.xterm-viewport') as HTMLElement | null;
   if (xtermViewport) {
     xtermViewport.addEventListener('scroll', () => {
+      // During attach/replay, xterm updates scrollHeight before scrollTop — the
+      // brief desync makes atBottom appear false even though we're at the bottom.
+      // Suppress scroll lock updates during this window to avoid locking on a
+      // stale position and causing all subsequent writes to restore the wrong scrollTop.
+      if (attachingSession.has(sessionId)) return;
       const atBottom = xtermViewport.scrollTop + xtermViewport.clientHeight >= xtermViewport.scrollHeight - 10;
       scrollLocked.set(sessionId, !atBottom);
     }, { passive: true });
@@ -176,15 +197,17 @@ export function repaintTerminal(sessionId: string): void {
   const { cols, rows } = instance.term;
   instance.term.resize(cols, rows + 1);
   instance.term.resize(cols, rows);
-  if (!scrollLocked.get(sessionId)) {
-    instance.term.scrollToBottom();
-    // Also force DOM scrollTop directly — term.scrollToBottom() updates xterm's
-    // virtual buffer pointer but the DOM .xterm-viewport scrollTop can be stale
-    // (e.g., was set to 0 while the container was display:none during buffer replay).
-    // Direct DOM manipulation is the only reliable way to fix this.
-    const viewport = instance.container.querySelector('.xterm-viewport') as HTMLElement | null;
-    if (viewport) viewport.scrollTop = viewport.scrollHeight;
-  }
+  // repaintTerminal is called explicitly to bring the terminal into view —
+  // always scroll to bottom regardless of scroll lock. The scroll lock reflects
+  // user intent during normal reading, but repaint is triggered by system events
+  // (tab switch, reconnect, keyboard open) where we MUST show the cursor position.
+  // Also clear the scroll lock so subsequent writes follow output correctly.
+  scrollLocked.set(sessionId, false);
+  instance.term.scrollToBottom();
+  // Direct DOM scroll as backup — term.scrollToBottom() updates xterm's virtual
+  // ydisp but the DOM .xterm-viewport scrollTop can lag or be stale.
+  const viewport = instance.container.querySelector('.xterm-viewport') as HTMLElement | null;
+  if (viewport) viewport.scrollTop = viewport.scrollHeight;
   instance.term.refresh(0, rows - 1);
 }
 
@@ -211,7 +234,9 @@ export function writeToTerminal(sessionId: string, data: string): void {
   // If the user scrolled up to read history, don't yank them to the bottom.
   // scrollLocked is set by the DOM scroll listener in createTerminal — it reflects
   // user intent, not xterm's async buffer state (which can be stale mid-replay).
-  if (scrollLocked.get(sessionId)) {
+  // Exception: during attach/replay (attachingSession), always follow output — the
+  // scroll lock was suppressed during replay, but clear it here as belt-and-suspenders.
+  if (scrollLocked.get(sessionId) && !attachingSession.has(sessionId)) {
     if (isMobile.value) {
       // Mobile: physically restore the DOM scrollTop after xterm renders, because
       // xterm's internal write can shift the viewport element's scroll position.
