@@ -29,6 +29,11 @@ let reconnectBackoff = 500; // Exponential backoff: 0.5s → 1s → 2s → ... �
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 15;
 
+// True only on the first status message after a WS reconnect.
+// Prevents onSessionReattached from firing on every status broadcast
+// (auth monitor, session events, etc.) — it should only fire after a real reconnect.
+let pendingReattach = false;
+
 // Track which sessions have been attached on the current WS connection
 // to prevent duplicate console:attach messages on reconnect.
 const attachedSessions = new Set<string>();
@@ -37,6 +42,12 @@ const attachedSessions = new Set<string>();
 // On reconnect, all buffered resizes are flushed so every terminal
 // gets its correct dimensions — not just the last one that fired.
 const pendingResizes = new Map<string, object>();
+
+// Buffer console:input messages sent while disconnected so keystrokes
+// aren't silently dropped during brief reconnects. Capped to prevent
+// unbounded growth during long disconnects.
+const MAX_PENDING_INPUTS = 200;
+const pendingInputs: object[] = [];
 
 // Called after each session is re-attached on reconnect, so the
 // terminal layer can resync PTY dimensions for that session.
@@ -66,6 +77,11 @@ export function wsSend(msg: object): void {
     if (typeof sessionId === 'string') {
       pendingResizes.set(sessionId, msg);
     }
+  } else if ((msg as any).type === 'console:input') {
+    // Buffer input so keystrokes typed during a brief disconnect aren't lost.
+    if (pendingInputs.length < MAX_PENDING_INPUTS) {
+      pendingInputs.push(msg);
+    }
   }
 }
 
@@ -86,6 +102,7 @@ function openWs(wsUrl: string): void {
     reconnectBackoff = 500; // Reset backoff on successful connection
     reconnectAttempts = 0;
     attachedSessions.clear(); // New connection — reset attach tracking
+    pendingReattach = true;   // Next status message should trigger session reattachment
     addLog({ type: 'info', message: 'Connected to server', timestamp: Date.now() });
     // Don't re-attach here — wait for the 'status' message which includes
     // the server's current session list. Attaching stale IDs after a
@@ -97,6 +114,13 @@ function openWs(wsUrl: string): void {
       ws!.send(JSON.stringify(msg));
     }
     pendingResizes.clear();
+
+    // Flush buffered input messages in order — keystrokes typed during
+    // the disconnect are delivered once the connection is restored.
+    for (const msg of pendingInputs) {
+      ws!.send(JSON.stringify(msg));
+    }
+    pendingInputs.length = 0;
 
     // Start stale connection detector — if server stops sending heartbeats,
     // the connection is dead and we need to reconnect.
@@ -123,15 +147,16 @@ function openWs(wsUrl: string): void {
       if (msg.type === 'status') {
         if (typeof msg.data !== 'object' || msg.data === null) return;
         updateStateFromServer(msg.data);
-        // Notify the terminal layer so it can resync PTY dimensions and
-        // re-attach each session after fitting — attaching here (before fit)
-        // would cause the server to stream replay data into an unsized terminal,
-        // producing a black screen.  attachSession is called inside
-        // onSessionReattached (WS-reconnect) and useEffect (F5 page load),
-        // both after fitTerminal runs.
-        sessions.value.forEach(s => {
-          onSessionReattached?.(s.id);
-        });
+        // Only reattach terminals on the first status after a real WS reconnect.
+        // Subsequent status broadcasts (auth monitor, session events) must NOT
+        // trigger fitTerminal/scrollToBottom — those calls block the main thread
+        // briefly and cause intermittent input freezes.
+        if (pendingReattach) {
+          pendingReattach = false;
+          sessions.value.forEach(s => {
+            onSessionReattached?.(s.id);
+          });
+        }
         // Clear the restoring overlay only when the server confirms sessions are
         // already ready (pendingRestore absent or false).  When pendingRestore is
         // true the server still has PTY sessions in flight — the sessions:restored
