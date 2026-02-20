@@ -82,9 +82,11 @@ export function handleWsUpgrade(
 ): void {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
-  // Auth: validate daemon token from query param (skip if no password configured)
+  // Auth: validate daemon token from query param (skip if no password configured).
+  // Frontend sends ?ticket= (preferred, from /api/auth/ws-ticket) or ?token= (fallback).
+  // Both carry the same daemon session token value.
   if (isPasswordConfigured()) {
-    const token = url.searchParams.get('token');
+    const token = url.searchParams.get('ticket') || url.searchParams.get('token');
     if (!token || !validateSession(token)) {
       clientSocket.write(
         'HTTP/1.1 401 Unauthorized\r\n' +
