@@ -44,10 +44,15 @@ const attachedSessions = new Set<string>();
 const pendingResizes = new Map<string, object>();
 
 // Buffer console:input messages sent while disconnected so keystrokes
-// aren't silently dropped during brief reconnects. Capped to prevent
-// unbounded growth during long disconnects.
+// aren't silently dropped during brief reconnects. Capped per session to
+// prevent unbounded growth during long disconnects.
+// Keyed by sessionId so inputs can be flushed per-session inside attachSession
+// (AFTER console:attach is sent) rather than in onopen (BEFORE attach).
+// Flushing inputs in onopen is a race: the server receives input before it has
+// registered this client in sessionClients, so PTY output has no recipient and
+// is silently dropped — the user sees typed text permanently disappear.
 const MAX_PENDING_INPUTS = 200;
-const pendingInputs: object[] = [];
+const pendingInputs = new Map<string, object[]>();
 
 // Called after each session is re-attached on reconnect, so the
 // terminal layer can resync PTY dimensions for that session.
@@ -79,18 +84,39 @@ export function wsSend(msg: object): void {
     }
   } else if ((msg as any).type === 'console:input') {
     // Buffer input so keystrokes typed during a brief disconnect aren't lost.
-    if (pendingInputs.length < MAX_PENDING_INPUTS) {
-      pendingInputs.push(msg);
+    const sid = (msg as any).sessionId;
+    if (typeof sid === 'string') {
+      const arr = pendingInputs.get(sid) ?? [];
+      if (arr.length < MAX_PENDING_INPUTS) {
+        if (!pendingInputs.has(sid)) pendingInputs.set(sid, arr);
+        arr.push(msg);
+      }
     }
   }
 }
 
 /** Send console:attach only once per session per WS connection.
- *  Prevents duplicate attach when multiple code paths fire on reconnect. */
+ *  Prevents duplicate attach when multiple code paths fire on reconnect.
+ *  After attaching, flushes any inputs buffered while the WS was down —
+ *  with a small delay so the server can process the attach and register
+ *  this client in sessionClients before the buffered input arrives. */
 export function attachSession(sessionId: string): void {
   if (attachedSessions.has(sessionId)) return;
   attachedSessions.add(sessionId);
   wsSend({ type: 'console:attach', sessionId });
+
+  // Flush pending inputs for this session after a brief delay.
+  // Without the delay: inputs arrive before the server processes console:attach
+  // → PTY writes succeed but sessionClients doesn't include this client yet
+  // → output broadcast finds no recipient → output silently dropped
+  // → typed text never appears (not delayed — permanently lost).
+  const pending = pendingInputs.get(sessionId);
+  if (pending && pending.length > 0) {
+    pendingInputs.delete(sessionId);
+    setTimeout(() => {
+      for (const msg of pending) wsSend(msg);
+    }, 100);
+  }
 }
 
 function openWs(wsUrl: string): void {
@@ -114,13 +140,9 @@ function openWs(wsUrl: string): void {
       ws!.send(JSON.stringify(msg));
     }
     pendingResizes.clear();
-
-    // Flush buffered input messages in order — keystrokes typed during
-    // the disconnect are delivered once the connection is restored.
-    for (const msg of pendingInputs) {
-      ws!.send(JSON.stringify(msg));
-    }
-    pendingInputs.length = 0;
+    // NOTE: pendingInputs are NOT flushed here. They are flushed per-session
+    // inside attachSession() after console:attach is sent, so the server has
+    // time to register this client before input arrives.
 
     // Start stale connection detector — if server stops sending heartbeats,
     // the connection is dead and we need to reconnect.

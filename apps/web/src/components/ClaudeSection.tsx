@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile, restoringPending } from '../state/store';
 import { apiFetch } from '../api';
-import { createTerminal, destroyTerminal, fitTerminal, focusTerminal, writeToTerminal, scrollToBottom, getTerminal } from '../terminal';
+import { createTerminal, destroyTerminal, fitTerminal, repaintTerminal, focusTerminal, writeToTerminal, scrollToBottom, getTerminal } from '../terminal';
 import { wsSend, setTerminalHandlers, attachSession, setOnSessionReattached } from '../ws';
 import { IconPlus, IconX, IconShell, IconTerminal } from './Icons';
 import { MobileTerminalToolbar } from './MobileTerminalToolbar';
@@ -81,10 +81,15 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
       // default 80x24 — then fitAddon.fit() reflows to the real size and the
       // viewport ends up in the wrong position (content appears above, black screen).
       const sid = s.id;
-      // Fit BEFORE attaching so the server replays at the correct dimensions.
       requestAnimationFrame(() => {
         fitTerminal(sid);
         attachSession(sid);
+        // Repaint after buffer replay settles. The terminal may be hidden (display:none)
+        // during replay if the section isn't 'claude' yet — fitTerminal bails on hidden
+        // containers, leaving xterm at 80x24. repaintTerminal forces syncScrollArea
+        // so the viewport lands at the cursor (bottom) instead of the top (black screen).
+        // 600ms: enough for most buffer replays to complete and the section to become visible.
+        setTimeout(() => repaintTerminal(sid), 600);
       });
     }
 
@@ -103,8 +108,13 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
     // scrollToBottom after fit: xterm may have rendered at wrong dims before
     // this tab was active (80x24 default) — after reflow the viewport can be
     // anywhere, so we always land at the latest content on tab switch.
+    // repaintTerminal: force xterm to reposition its viewport after becoming
+    // visible. fitAddon.fit() with unchanged dims is a no-op (term.resize not
+    // called → syncScrollArea never runs → canvas stays black). The micro-resize
+    // trick forces syncScrollArea regardless of whether dimensions changed.
     requestAnimationFrame(() => {
       fitTerminal(activeId);
+      requestAnimationFrame(() => repaintTerminal(activeId));
       scrollToBottom(activeId);
       focusTerminal(activeId);
     });
