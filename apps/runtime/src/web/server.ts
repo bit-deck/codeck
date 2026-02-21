@@ -426,7 +426,7 @@ export async function startWebServer(): Promise<void> {
     startPortScanner();
     startMdns();
     initProactiveAgents(broadcast);
-    startTokenRefreshMonitor();
+    startTokenRefreshMonitor(broadcast);
 
     // Daily session transcript cleanup (remove >30 day old JSONL files)
     // Run once at startup and then every 24 hours

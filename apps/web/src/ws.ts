@@ -1,4 +1,4 @@
-import { setWsConnected, updateStateFromServer, addLog, sessions, activeSessionId, addSession, setActiveSessionId, setActivePorts, setActiveSection, setRestoringPending, type LogEntry, removeSession, updateProactiveAgent, appendAgentOutput, setAgentRunning } from './state/store';
+import { setWsConnected, updateStateFromServer, addLog, sessions, activeSessionId, addSession, setActiveSessionId, setActivePorts, setActiveSection, setRestoringPending, type LogEntry, removeSession, updateProactiveAgent, appendAgentOutput, setAgentRunning, claudeAuthenticated } from './state/store';
 import { getAuthToken } from './api';
 
 // Known WebSocket message types — reject anything not in this set
@@ -6,6 +6,7 @@ const KNOWN_MSG_TYPES = new Set([
   'heartbeat', 'status', 'log', 'logs', 'ports', 'sessions:restored',
   'console:error', 'console:output', 'console:exit',
   'agent:update', 'agent:output', 'agent:execution:start', 'agent:execution:complete',
+  'auth:expiring', 'auth:expired',
 ]);
 
 /** Runtime validation for incoming WebSocket messages */
@@ -75,20 +76,25 @@ export function setTerminalHandlers(output: OutputHandler, exit: ExitHandler): v
 export function wsSend(msg: object): void {
   const msgType = (msg as any).type;
   if (ws && ws.readyState === WebSocket.OPEN) {
-    // Post-reconnect race guard: WS is OPEN but we're still in the pendingReattach
-    // window (waiting for the first status message before re-attaching sessions).
-    // During this window, console:input sent directly would arrive at the server
-    // BEFORE console:attach — the server writes to the PTY but this client is not
-    // yet registered in sessionClients → PTY echo has no recipient → input lost.
-    // Fix: buffer console:input during this window; attachSession flushes after attach.
-    if (pendingReattach && msgType === 'console:input') {
+    // Buffer console:input if this session hasn't been re-attached yet.
+    // This covers two races:
+    //   (1) pendingReattach window: WS just reconnected, status message not yet
+    //       received — attachedSessions was cleared in onopen.
+    //   (2) status→rAF gap (~16ms): status message clears pendingReattach and
+    //       schedules attachSession in a rAF, but inputs fired in those 16ms
+    //       would arrive at the server before console:attach is processed —
+    //       server writes to PTY but this client isn't in sessionClients yet
+    //       → PTY echo has no recipient → input appears frozen.
+    // Checking attachedSessions.has(sid) catches both races: it's false from
+    // onopen.clear() until attachSession() calls attachedSessions.add().
+    if (msgType === 'console:input') {
       const sid = (msg as any).sessionId;
-      if (typeof sid === 'string') {
+      if (typeof sid === 'string' && !attachedSessions.has(sid)) {
         const arr = pendingInputs.get(sid) ?? [];
         if (!pendingInputs.has(sid)) pendingInputs.set(sid, arr);
         if (arr.length < MAX_PENDING_INPUTS) arr.push(msg);
+        return;
       }
-      return;
     }
     ws.send(JSON.stringify(msg));
   } else if (msgType === 'console:resize') {
@@ -259,6 +265,12 @@ function openWs(wsUrl: string): void {
         if (typeof msg.data?.agentId === 'string') {
           setAgentRunning(msg.data.agentId, false);
         }
+      } else if (msg.type === 'auth:expiring') {
+        const minutes = typeof msg.data?.minutesLeft === 'number' ? msg.data.minutesLeft : '?';
+        addLog({ type: 'warn', message: `Claude session expires in ${minutes} minutes. Please re-login to avoid interruptions.`, timestamp: Date.now() });
+      } else if (msg.type === 'auth:expired') {
+        // Mark as unauthenticated — app.tsx subscribes to this and opens the login modal
+        claudeAuthenticated.value = false;
       }
     } catch (err) {
       console.warn('[WS] Failed to parse message:', err);

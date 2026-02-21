@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, chmodSync, statSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { ACTIVE_AGENT } from './agent.js';
-import { readCredentials, getCachedOAuthToken, isRealToken, getInMemoryToken } from './auth-anthropic.js';
+import { readCredentials, getCachedOAuthToken, isRealToken, getInMemoryToken, getInMemoryTokenExpiresAt } from './auth-anthropic.js';
 
 // Resolve agent binary path — re-resolves if cached path becomes invalid
 let agentBinaryPath: string = ACTIVE_AGENT.command;
@@ -48,11 +48,24 @@ export function setAgentBinaryPath(path: string): void {
 
 export function getOAuthEnv(): Record<string, string> {
   const env: Record<string, string> = {};
+  const now = Date.now();
 
   // Priority 0: in-memory token (authoritative — survives file deletions)
+  // getInMemoryToken() returns null if the token is known to be expired.
   const memToken = getInMemoryToken();
   if (memToken && isRealToken(memToken)) {
     env.CLAUDE_CODE_OAUTH_TOKEN = memToken;
+    return env;
+  }
+
+  // In-memory token expired or missing — fall through to file-based sources.
+  // Do NOT return a cached plaintext token that might also be expired.
+  // Instead, omit CLAUDE_CODE_OAUTH_TOKEN so the Claude CLI reads .credentials.json
+  // directly and can use the stored refreshToken to obtain a new access token.
+  const expiresAt = getInMemoryTokenExpiresAt();
+  if (expiresAt > 0 && now >= expiresAt) {
+    // Token is expired — let the CLI handle refresh via credentials file
+    console.log('[claude-env] Access token expired, omitting CLAUDE_CODE_OAUTH_TOKEN so CLI can self-refresh');
     return env;
   }
 

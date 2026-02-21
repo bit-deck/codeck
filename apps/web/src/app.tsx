@@ -87,9 +87,18 @@ export function App() {
     const preventPullToRefresh = (e: TouchEvent) => {
       // Only prevent when at top of page (pull-to-refresh trigger zone)
       if (window.scrollY === 0 && e.touches[0]?.clientY > 0) {
-        const target = e.target as HTMLElement | null;
-        // Allow scrolling inside elements with overflow (e.g., terminal viewport)
-        if (target?.closest('.xterm-viewport, .scrollable')) return;
+        // Walk up the DOM from the touch target to see if any ancestor is a
+        // scrollable container (overflow-y: auto or scroll). If so, this is a
+        // legitimate in-app scroll — allow it. Only prevent the browser's own
+        // pull-to-refresh gesture (touches that start outside any scrollable area).
+        // Using the DOM walk instead of a class whitelist avoids maintaining a list
+        // of every scrollable section class in the app.
+        let el = e.target as HTMLElement | null;
+        while (el && el !== document.body) {
+          const oy = getComputedStyle(el).overflowY;
+          if (oy === 'auto' || oy === 'scroll') return;
+          el = el.parentElement as HTMLElement | null;
+        }
         e.preventDefault();
       }
     };
