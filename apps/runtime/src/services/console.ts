@@ -232,7 +232,7 @@ export function createShellSession(cwd?: string): ConsoleSession {
 
   let pty: IPty;
   try {
-    pty = ptySpawn('/bin/bash', ['--login'], {
+    pty = ptySpawn('/bin/bash', [], {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,

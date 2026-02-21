@@ -33,6 +33,12 @@ const clientDimensions = new Map<WebSocket, Map<string, { cols: number; rows: nu
 // sessionId → { cols, rows } (current max dimensions applied to PTY)
 const sessionMaxDimensions = new Map<string, { cols: number; rows: number }>();
 
+// Freeze detector: tracks last time PTY produced output per session.
+// When console:input arrives but PTY has been silent for >5s, logs a warning
+// visible in the Codeck Logs panel — helps distinguish PTY-silent freezes
+// (Claude Code not echoing) from routing issues (sessionClients missing).
+const lastPtyOutputTime = new Map<string, number>();
+
 // Max input payload size per WS message (64KB per OWASP recommendation)
 const MAX_INPUT_SIZE = 65536;
 
@@ -324,6 +330,7 @@ function handleConsoleMessage(ws: WebSocket, msg: { type: string; sessionId: str
     // clients disconnected and the session is being re-attached on WS reconnect).
     if (!sessionHandlers.has(sid)) {
       const dataDisposable = session.pty.onData((data: string) => {
+        lastPtyOutputTime.set(sid, Date.now());
         // Detect OAuth token revocation errors emitted by Claude CLI in real-time.
         // When the CLI outputs "OAuth token revoked", it means the token was revoked
         // server-side (e.g. user logged in from another device). We immediately:
@@ -374,7 +381,20 @@ function handleConsoleMessage(ws: WebSocket, msg: { type: string; sessionId: str
     }
   }
 
-  if (msg.type === 'console:input') writeToSession(msg.sessionId, msg.data || '');
+  if (msg.type === 'console:input') {
+    // Freeze detector: if PTY has been silent for >5s while input is arriving,
+    // log a warning in the Codeck Logs panel. This distinguishes:
+    //   - PTY not echoing (Claude Code blocked / raw mode) → lastPtyOutputTime is stale
+    //   - sessionClients race (no clients) → clients=0 in the log
+    const lastOut = lastPtyOutputTime.get(msg.sessionId);
+    const silentMs = lastOut !== undefined ? Date.now() - lastOut : -1;
+    if (silentMs > 5000) {
+      const clients = sessionClients.get(msg.sessionId)?.size ?? 0;
+      const handlerExists = sessionHandlers.has(msg.sessionId);
+      console.warn(`[WS] FREEZE DETECTED session=${msg.sessionId.slice(0,8)} PTY silent=${Math.round(silentMs/1000)}s clients=${clients} handler=${handlerExists}`);
+    }
+    writeToSession(msg.sessionId, msg.data || '');
+  }
 
   if (msg.type === 'console:resize') {
     // Store this client's dimensions
