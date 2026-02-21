@@ -13,9 +13,9 @@ import { search, isSearchAvailable } from './memory-search.js';
 
 const MARKER_START = '<!-- MEMORY_CONTEXT_START -->';
 const MARKER_END = '<!-- MEMORY_CONTEXT_END -->';
-const MAX_CONTEXT_CHARS = 5000;
+const MAX_CONTEXT_CHARS = 12000;
 // Daily logs can get long; only include the most recent portion so stale entries don't crowd out useful context.
-const MAX_DAILY_CHARS = 1500;
+const MAX_DAILY_CHARS = 2500;
 const WORKSPACE_CLAUDE_MD = join(PATHS.WORKSPACE, 'CLAUDE.md');
 
 /**
@@ -54,13 +54,7 @@ export function buildSessionContext(cwd: string): string {
     return '...\n' + (firstNewline !== -1 ? truncated.slice(firstNewline + 1) : truncated);
   };
 
-  // 1. Global durable memory (highest priority — curated long-term knowledge)
-  const globalMemory = getDurableMemory();
-  if (globalMemory.content) {
-    addPart('Durable Memory', globalMemory.content);
-  }
-
-  // 2. Path-scoped durable memory and daily
+  // 1. Path-scoped memory (highest priority when in a project — most relevant context)
   try {
     const pathId = resolvePathId(cwd);
 
@@ -76,6 +70,12 @@ export function buildSessionContext(cwd: string): string {
     }
   } catch {
     // Path resolution can fail on first use, that's fine
+  }
+
+  // 2. Global durable memory (curated long-term knowledge)
+  const globalMemory = getDurableMemory();
+  if (globalMemory.content) {
+    addPart('Durable Memory', globalMemory.content);
   }
 
   // 3. Global daily — recent portion only (auto-summaries can be verbose/noisy)
