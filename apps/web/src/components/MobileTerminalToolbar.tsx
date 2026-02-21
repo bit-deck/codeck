@@ -56,6 +56,19 @@ function tap(fn: () => void) {
   };
 }
 
+// Debounced fitTerminal: collapses overlapping calls into one, firing 350ms after
+// the last recalcLayout. Prevents reflow thrashing when multiple layout events
+// (visualViewport resize, onFocus, etc.) fire in rapid succession during typing.
+let fitDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function debouncedFitTerminal(sessionId: string): void {
+  if (fitDebounceTimer) clearTimeout(fitDebounceTimer);
+  fitDebounceTimer = setTimeout(() => {
+    fitDebounceTimer = null;
+    fitTerminal(sessionId);
+  }, 350);
+}
+
 /** Calculate and set terminal height to fill space between tabs and toolbar. */
 function recalcLayout(sessionId: string | undefined) {
   const vh = window.visualViewport?.height ?? window.innerHeight;
@@ -92,7 +105,7 @@ function recalcLayout(sessionId: string | undefined) {
   // container dimensions are estimated and would produce incorrect cols/rows.
   if (sessionId && tabsVisible) {
     requestAnimationFrame(() => scrollToBottom(sessionId));
-    setTimeout(() => fitTerminal(sessionId), 250);
+    debouncedFitTerminal(sessionId);
   }
 }
 
@@ -309,11 +322,9 @@ export function MobileTerminalToolbar() {
         onFocus={() => {
           resetInput();
           if (sessionId) scrollToBottom(sessionId);
-          // Belt-and-suspenders fallback: some Android keyboards take >300ms to fully
-          // open. Fire at 300ms, 500ms, and 700ms to catch slow animations.
-          setTimeout(() => recalcLayout(sessionId), 300);
-          setTimeout(() => recalcLayout(sessionId), 500);
-          setTimeout(() => recalcLayout(sessionId), 700);
+          // visualViewport.resize already handles keyboard-open layout updates
+          // with its own debounce — no extra timers needed here. They were the
+          // primary source of reflow thrashing during active typing.
         }}
         onBlur={() => {
           // Keyboard closing — recalc at multiple points to catch slow animations.

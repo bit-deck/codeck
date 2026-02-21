@@ -59,13 +59,16 @@ function attachSettleRepaint(sessionId: string): void {
     // history — in that case, respect their position and only refit, not repaint).
     // Intervals are chosen to cover slow devices and complex layout transitions
     // without spamming the PTY.
-    const stabilizeDelays = [500, 1500, 4000, 10000] as const;
+    const stabilizeDelays = [500, 1500] as const;
     for (const ms of stabilizeDelays) {
       setTimeout(() => {
         if (!getTerminal(sessionId)) return; // session destroyed
         console.debug(`[stabilize] ${sessionId.slice(0,6)} +${ms}ms`);
         fitTerminal(sessionId);
-        if (!isScrollLocked(sessionId)) repaintTerminal(sessionId);
+        // Skip repaint while user is actively typing on mobile — repaintTerminal
+        // does a micro-resize + full refresh that causes reflow freeze mid-keystroke.
+        const mobileInputActive = document.activeElement?.id === 'mobile-hidden-input';
+        if (!isScrollLocked(sessionId) && !mobileInputActive) repaintTerminal(sessionId);
       }, ms);
     }
   };
