@@ -4,7 +4,7 @@ import { getAuthToken } from './api';
 // Known WebSocket message types — reject anything not in this set
 const KNOWN_MSG_TYPES = new Set([
   'heartbeat', 'status', 'log', 'logs', 'ports', 'sessions:restored',
-  'console:error', 'console:output', 'console:exit',
+  'console:error', 'console:output', 'console:exit', 'console:freeze',
   'agent:update', 'agent:output', 'agent:execution:start', 'agent:execution:complete',
   'auth:expiring', 'auth:expired',
 ]);
@@ -96,6 +96,12 @@ export function wsSend(msg: object): void {
         if (arr.length < MAX_PENDING_INPUTS) arr.push(msg);
         return;
       }
+    }
+    // Add timestamp to input messages for client→server latency measurement.
+    // If the server sees a large gap (>2s) between sentAt and its own Date.now(),
+    // the delay is in the browser→daemon→runtime path (browser busy, WS stall, etc.)
+    if (msgType === 'console:input') {
+      (msg as any).sentAt = Date.now();
     }
     ws.send(JSON.stringify(msg));
   } else if (msgType === 'console:resize') {
@@ -246,6 +252,14 @@ function openWs(wsUrl: string): void {
       } else if (msg.type === 'console:output') {
         if (typeof msg.sessionId === 'string' && typeof msg.data === 'string') {
           onOutput?.(msg.sessionId, msg.data);
+        }
+      } else if (msg.type === 'console:freeze') {
+        // Server detected PTY freeze — log diagnostic info
+        if (typeof msg.sessionId === 'string') {
+          const dur = typeof msg.durationMs === 'number' ? Math.round(msg.durationMs / 1000) : '?';
+          const alive = msg.ptyAlive ? 'alive' : 'DEAD';
+          const lag = typeof msg.eventLoopLagMs === 'number' ? msg.eventLoopLagMs : '?';
+          addLog('warn', `Terminal freeze: ${dur}s (PTY: ${alive}, event loop lag: ${lag}ms)`);
         }
       } else if (msg.type === 'console:exit') {
         if (typeof msg.sessionId === 'string') {

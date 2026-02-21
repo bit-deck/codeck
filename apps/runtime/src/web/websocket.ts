@@ -412,6 +412,17 @@ function handleConsoleMessage(ws: WebSocket, msg: { type: string; sessionId: str
   }
 
   if (msg.type === 'console:input') {
+    // Measure client→server latency: if the browser added a sentAt timestamp,
+    // calculate the one-way delay. A spike (>2s) means the delay is in the
+    // browser (main thread busy) or daemon proxy (event loop blocked), not the runtime.
+    const sentAt = (msg as any).sentAt;
+    if (typeof sentAt === 'number') {
+      const clientServerDelay = Date.now() - sentAt;
+      if (clientServerDelay > 2000) {
+        console.warn(`[WS] HIGH LATENCY: client→server delay=${clientServerDelay}ms for session ${msg.sessionId.slice(0,8)} — freeze is in browser or daemon, not runtime`);
+      }
+    }
+
     // Freeze detector: if PTY has been silent for >5s OR the event loop was recently blocked
     // (>1s block within the last 10s), diagnose the cause and notify the client.
     //
@@ -424,7 +435,7 @@ function handleConsoleMessage(ws: WebSocket, msg: { type: string; sessionId: str
     const silentMs = lastOut !== undefined ? Date.now() - lastOut : -1;
     const recentBlockMs = Date.now() - _lastBlockTimestamp;
     const hadRecentBlock = recentBlockMs < 10000 && _lastBlockDuration > 1000;
-    if (silentMs > 5000 || hadRecentBlock) {
+    if (silentMs > 5000 || (hadRecentBlock && silentMs > 2000)) {
       const clientSet = sessionClients.get(msg.sessionId);
       const clientCount = clientSet?.size ?? 0;
       const handlerExists = sessionHandlers.has(msg.sessionId);
@@ -441,18 +452,59 @@ function handleConsoleMessage(ws: WebSocket, msg: { type: string; sessionId: str
         } catch { ptyAlive = false; }
       }
 
+      // Capture CPU usage at freeze time
+      const cpuUsage = process.cpuUsage();
+      let processCpuPct = 'N/A';
+      try {
+        // Read /proc/stat for system-wide CPU
+        const { readFileSync: rfs } = require('fs');
+        const procStat = rfs('/proc/stat', 'utf8').split('\n')[0].split(/\s+/);
+        const cpuTotal = procStat.slice(1, 8).reduce((a: number, b: string) => a + parseInt(b), 0);
+        const cpuIdle = parseInt(procStat[4]);
+        processCpuPct = `sys=${Math.round((1 - cpuIdle / cpuTotal) * 100)}%`;
+      } catch { /* ignore */ }
+
       console.warn(
         `[WS] FREEZE session=${msg.sessionId.slice(0,8)} silent=${Math.round(silentMs/1000)}s ` +
         `clients=${clientCount} handler=${handlerExists} ptyAlive=${ptyAlive} pid=${ptyPid} ` +
         `evLoopLag=${_eventLoopLagMs}ms peak=${_eventLoopLagPeak}ms ` +
-        `recentBlock=${hadRecentBlock ? `${_lastBlockDuration}ms@${Math.round(recentBlockMs/1000)}s_ago` : 'none'}`
+        `recentBlock=${hadRecentBlock ? `${_lastBlockDuration}ms@${Math.round(recentBlockMs/1000)}s_ago` : 'none'} ` +
+        `cpu=${processCpuPct} nodeRSS=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`
       );
 
-      // Attempt recovery: send SIGWINCH to the Claude Code process.
-      // SIGWINCH is harmless (just "window size changed") but interrupts blocked
-      // syscalls and libuv poll, potentially waking up a stalled Node.js event loop
-      // inside Claude Code. Combined with a no-op resize to force the PTY driver
-      // to deliver the signal.
+      // PTY echo probe: write a known marker and measure if/when it echoes back.
+      // This distinguishes "PTY not responsive" from "child process discarding input."
+      // Uses BEL character (0x07) — terminal beep, harmless, and uniquely identifiable
+      // in onData output. If we see it echo within 2s, the PTY path works and the
+      // freeze is the child process not echoing user input.
+      if (ptyAlive && session) {
+        const probeId = Date.now().toString(36);
+        const probeSentAt = Date.now();
+        // Write a OSC sequence that most terminal apps pass through or ignore:
+        // \x1b]999;probe-{id}\x07 — won't display anything visible
+        const probe = `\x1b]999;probe-${probeId}\x07`;
+        try {
+          writeToSession(msg.sessionId, probe);
+          // Check if probe echoes within 2s
+          const checkProbe = () => {
+            const elapsed = Date.now() - probeSentAt;
+            const lastOut = lastPtyOutputTime.get(msg.sessionId);
+            const outputSince = lastOut ? lastOut > probeSentAt : false;
+            if (outputSince) {
+              console.log(`[WS] PROBE echoed in ${elapsed}ms — PTY responsive, child process ignoring user input`);
+            } else if (elapsed < 2000) {
+              setTimeout(checkProbe, 200);
+            } else {
+              console.warn(`[WS] PROBE no echo after 2s — PTY or child process completely blocked`);
+            }
+          };
+          setTimeout(checkProbe, 200);
+        } catch (e) {
+          console.warn(`[WS] PROBE write failed: ${(e as Error).message}`);
+        }
+      }
+
+      // Attempt recovery: send SIGWINCH to the child process.
       if (ptyAlive && silentMs > 8000) {
         try {
           const dims = sessionMaxDimensions.get(msg.sessionId);
