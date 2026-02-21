@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
-import { activeSessionId } from '../state/store';
-import { sendTerminalInput, getTerminalBuffer, scrollToBottom, fitTerminal, onTerminalWrite } from '../terminal';
+import { activeSessionId, activeSection } from '../state/store';
+import { sendTerminalInput, getTerminalBuffer, scrollToBottom, fitTerminal, repaintTerminal, onTerminalWrite } from '../terminal';
 
 // Escape sequences for special keys
 const SPECIAL_KEYS: Record<string, string> = {
@@ -36,14 +36,22 @@ const SENTINEL = '\u200B'; // Zero-width space
  * Unified tap handler using Pointer Events. Handles mouse, touch, and stylus
  * in a single code path. preventDefault stops the browser from opening the
  * keyboard or firing redundant events.
+ *
+ * IMPORTANT: do NOT blur mobile-hidden-input here. Any blur without an
+ * immediate re-focus disconnects keyboard events — the user can see the
+ * keyboard but keystrokes reach no handler (freeze). Re-focus after fn()
+ * to keep the hidden input connected even after toolbar button taps.
  */
 function tap(fn: () => void) {
   return {
     onPointerUp: (e: PointerEvent) => {
       e.preventDefault();
-      const active = document.activeElement as HTMLElement | null;
-      if (active?.id === 'mobile-hidden-input') active.blur();
       fn();
+      // Re-focus hidden input so keyboard events keep flowing after toolbar tap.
+      // Without this, the input stays blurred and the user must tap the terminal
+      // area to recover — which looks like an input freeze.
+      const input = document.getElementById('mobile-hidden-input') as HTMLInputElement | null;
+      input?.focus();
     },
   };
 }
@@ -67,19 +75,22 @@ function recalcLayout(sessionId: string | undefined) {
   const toolbarInView = toolbarRect ? toolbarRect.top < vh - 10 : false;
   const toolbarH = toolbarInView ? (toolbarRect?.height ?? 0) : 0;
 
-  const available = Math.max(50, vh - tabsH - toolbarH - 2);
+  // If .terminal-tabs has zero height the Claude section is hidden (display:none
+  // parent). In that case tabsH=0 so we'd compute an oversized available height,
+  // causing fitTerminal to resize the terminal to too many rows. Use an estimated
+  // tab bar height instead so the height stored in CSS is close to correct, and
+  // skip fitTerminal (wrong dims would be sent as SIGWINCH to the PTY).
+  const tabsVisible = tabsH > 0;
+  const effectiveTabsH = tabsVisible ? tabsH : 44; // 44px typical mobile tab bar
+  const available = Math.max(50, vh - effectiveTabsH - toolbarH - 2);
 
-  console.debug(`[recalcLayout] vh=${vh} tabsH=${tabsH} toolbarH=${toolbarH} available=${available} sessionId=${sessionId?.slice(0,6)}`);
+  console.debug(`[recalcLayout] vh=${vh} tabsH=${tabsH} (visible=${tabsVisible}) toolbarH=${toolbarH} available=${available} sessionId=${sessionId?.slice(0,6)}`);
   instances.style.height = `${available}px`;
   instances.style.maxHeight = `${available}px`;
 
-  // Call fitTerminal after CSS propagates. The ResizeObserver handles the primary
-  // fit (200ms debounce), but this explicit call ensures the terminal is resized
-  // even if the ResizeObserver doesn't fire (e.g., height didn't change from 0
-  // because the terminal-instance wasn't visible yet). fitTerminal deduplicates
-  // SIGWINCH (only sends console:resize when cols/rows change), so calling both
-  // here and from the ResizeObserver sends at most one resize signal.
-  if (sessionId) {
+  // Only call fitTerminal when the section is actually visible — otherwise the
+  // container dimensions are estimated and would produce incorrect cols/rows.
+  if (sessionId && tabsVisible) {
     requestAnimationFrame(() => scrollToBottom(sessionId));
     setTimeout(() => fitTerminal(sessionId), 250);
   }
@@ -222,6 +233,26 @@ export function MobileTerminalToolbar() {
       window.removeEventListener('resize', handler);
     };
   }, [sessionId]);
+
+  // --- Recalc when section switches to 'claude' ---
+  // When the user navigates to the Claude section, .terminal-tabs becomes visible
+  // and getBoundingClientRect() returns its real height. Recalc so the terminal
+  // gets its correct explicit height and fitTerminal sends the right SIGWINCH.
+  // Also call repaintTerminal to ensure scroll position is correct (without it,
+  // the terminal may show ydisp=0 / top of scrollback instead of the current output).
+  const currentSection = activeSection.value;
+  useEffect(() => {
+    if (currentSection === 'claude') {
+      recalcLayout(sessionId);
+      // After recalcLayout sets correct height and its 250ms fitTerminal runs,
+      // call repaintTerminal to force xterm to scroll to the current output position.
+      const t = setTimeout(() => {
+        recalcLayout(sessionId);
+        if (sessionId) repaintTerminal(sessionId);
+      }, 350);
+      return () => clearTimeout(t);
+    }
+  }, [currentSection, sessionId]);
 
   // --- Adaptive prompt detection (event-driven, not polling) ---
 

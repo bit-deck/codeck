@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { sessions, activeSessionId, setActiveSessionId, addLocalLog, addSession, removeSession, renameSession, agentName, isMobile, restoringPending, wsConnected } from '../state/store';
 import { apiFetch } from '../api';
-import { createTerminal, destroyTerminal, fitTerminal, repaintTerminal, focusTerminal, writeToTerminal, scrollToBottom, getTerminal, markSessionAttaching, clearSessionAttaching, onTerminalWrite } from '../terminal';
+import { createTerminal, destroyTerminal, fitTerminal, repaintTerminal, focusTerminal, writeToTerminal, scrollToBottom, getTerminal, isScrollLocked, markSessionAttaching, clearSessionAttaching, onTerminalWrite } from '../terminal';
 import { wsSend, setTerminalHandlers, attachSession, setOnSessionReattached } from '../ws';
 import { IconPlus, IconX, IconShell, IconTerminal } from './Icons';
 import { MobileTerminalToolbar } from './MobileTerminalToolbar';
@@ -47,13 +47,26 @@ function attachSettleRepaint(sessionId: string): void {
     // does the micro-resize, and scrolls to bottom.
     fitTerminal(sessionId);
     repaintTerminal(sessionId);
-    // If the container was still hidden when repaintTerminal ran (it bails on
-    // offsetHeight=0), retry once the active class has been applied by the
-    // useEffect([activeId]) cycle which runs after sessionList.length effect.
-    const el = document.getElementById('term-' + sessionId);
-    if (el && el.offsetHeight === 0) {
-      console.debug(`[settle] ${sessionId.slice(0,6)} container still 0 — retry in 200ms`);
-      setTimeout(() => { fitTerminal(sessionId); repaintTerminal(sessionId); }, 200);
+
+    // Stabilization retries — safety net for cases where:
+    // - The container was hidden (section not active) during the initial settle
+    //   → fitTerminal / repaintTerminal bailed on 0-height container
+    // - recalcLayout ran with estimated dims (tabs hidden) and sent wrong SIGWINCH
+    // - Any other transient timing issue during reconnect / page load
+    //
+    // Each retry calls fitTerminal (sends SIGWINCH if dims differ → PTY corrects)
+    // and repaintTerminal if not scroll-locked (user hasn't scrolled up to read
+    // history — in that case, respect their position and only refit, not repaint).
+    // Intervals are chosen to cover slow devices and complex layout transitions
+    // without spamming the PTY.
+    const stabilizeDelays = [500, 1500, 4000, 10000] as const;
+    for (const ms of stabilizeDelays) {
+      setTimeout(() => {
+        if (!getTerminal(sessionId)) return; // session destroyed
+        console.debug(`[stabilize] ${sessionId.slice(0,6)} +${ms}ms`);
+        fitTerminal(sessionId);
+        if (!isScrollLocked(sessionId)) repaintTerminal(sessionId);
+      }, ms);
     }
   };
 }
@@ -77,12 +90,26 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
       // is already live (WS transient reconnect).
       if (!getTerminal(sessionId)) return;
 
-      // Fit first, then attach so the server replays at the correct dimensions.
+      // Call attachSession immediately (outside rAF) to minimize the input
+      // buffering window. During a WS reconnect, attachedSessions is cleared in
+      // onopen — any console:input sent while attachedSessions.has(sid)=false is
+      // buffered in pendingInputs and only flushed after attachSession runs.
+      // Wrapping in rAF adds ~16ms to that window on top of the 50ms reconnect
+      // delay and RTT. By attaching synchronously here, inputs resume flowing as
+      // soon as the status message arrives from the server.
+      //
+      // Note: pendingResizes are flushed in onopen (before the status message),
+      // so the server already has our dimensions when attachSession fires — the
+      // server-side guard (clientDimensions.get(ws)?.has(sessionId)) will
+      // recalcMaxDimensions with those stored dims before replaying the buffer.
+      // fitTerminal runs in the rAF below to refine dims after layout settles.
+      markSessionAttaching(sessionId);
+      attachSession(sessionId);
+      attachSettleRepaint(sessionId);
+
+      // fitTerminal needs rAF to read post-layout container dimensions.
       requestAnimationFrame(() => {
         fitTerminal(sessionId);
-        markSessionAttaching(sessionId);
-        attachSession(sessionId);
-        attachSettleRepaint(sessionId);
         if (sessionId === activeSessionId.value) focusTerminal(sessionId);
       });
     });

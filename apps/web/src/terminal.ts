@@ -23,6 +23,18 @@ const scrollLocked = new Map<string, boolean>();
 // the "black terminal" race where every write restores the wrong (0) scrollTop.
 const attachingSession = new Set<string>();
 
+// Deadline timestamps (ms since epoch) per session for suppressing scroll events
+// triggered by our OWN programmatic scrollToBottom() calls. Without this, the
+// scroll event fired by scrollToBottom() in a write callback can race with a
+// concurrent buffer expansion (scrollHeight grows) and make atBottom=false →
+// spuriously set scrollLocked=true even though the user never scrolled up.
+const programmaticScrollUntil = new Map<string, number>();
+
+/** Mark the next ~100ms of scroll events as programmatic for this session. */
+function suppressScrollEvents(sessionId: string): void {
+  programmaticScrollUntil.set(sessionId, Date.now() + 100);
+}
+
 /** Call before attachSession to suppress spurious scroll lock during replay. */
 export function markSessionAttaching(sessionId: string): void {
   attachingSession.add(sessionId);
@@ -106,6 +118,12 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
       // Suppress scroll lock updates during this window to avoid locking on a
       // stale position and causing all subsequent writes to restore the wrong scrollTop.
       if (attachingSession.has(sessionId)) return;
+      // Also ignore scroll events triggered by our own programmatic scrollToBottom()
+      // calls (e.g., in write callbacks). Without this, a race between scrollToBottom()
+      // and a concurrent buffer expansion (scrollHeight grows before scrollTop updates)
+      // makes atBottom=false and spuriously sets scrollLocked=true.
+      const deadline = programmaticScrollUntil.get(sessionId) ?? 0;
+      if (Date.now() < deadline) return;
       const atBottom = xtermViewport.scrollTop + xtermViewport.clientHeight >= xtermViewport.scrollHeight - 10;
       scrollLocked.set(sessionId, !atBottom);
     }, { passive: true });
@@ -148,6 +166,11 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
 
 export function getTerminal(sessionId: string): TerminalInstance | undefined {
   return terminals.get(sessionId);
+}
+
+/** Returns true if the user has scrolled up and auto-scroll is suspended. */
+export function isScrollLocked(sessionId: string): boolean {
+  return scrollLocked.get(sessionId) ?? false;
 }
 
 export function destroyTerminal(sessionId: string): void {
@@ -219,11 +242,12 @@ export function repaintTerminal(sessionId: string): void {
   // (tab switch, reconnect, keyboard open) where we MUST show the cursor position.
   // Also clear the scroll lock so subsequent writes follow output correctly.
   scrollLocked.set(sessionId, false);
+  suppressScrollEvents(sessionId);
   instance.term.scrollToBottom();
   // Direct DOM scroll as backup — term.scrollToBottom() updates xterm's virtual
   // ydisp but the DOM .xterm-viewport scrollTop can lag or be stale.
   const viewport = instance.container.querySelector('.xterm-viewport') as HTMLElement | null;
-  if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  if (viewport) { suppressScrollEvents(sessionId); viewport.scrollTop = viewport.scrollHeight; }
   instance.term.refresh(0, rows - 1);
 }
 
@@ -253,17 +277,11 @@ export function writeToTerminal(sessionId: string, data: string): void {
   // Exception: during attach/replay (attachingSession), always follow output — the
   // scroll lock was suppressed during replay, but clear it here as belt-and-suspenders.
   if (scrollLocked.get(sessionId) && !attachingSession.has(sessionId)) {
-    if (isMobile.value) {
-      // Mobile: physically restore the DOM scrollTop after xterm renders, because
-      // xterm's internal write can shift the viewport element's scroll position.
-      const viewport = instance.term.element?.querySelector('.xterm-viewport') as HTMLElement | null;
-      if (viewport) {
-        const savedTop = viewport.scrollTop;
-        instance.term.write(sanitized, () => { viewport.scrollTop = savedTop; });
-        return;
-      }
-    }
-    // Desktop: xterm preserves scroll position natively — just write.
+    // Just write without scrolling. xterm internally adjusts viewport.scrollTop to
+    // keep the current visual rows visible as new lines are added (syncScrollArea),
+    // so the user's scroll position is preserved without explicit savedTop restoration.
+    // The old mobile savedTop-restore approach fought xterm's own scroll management
+    // and caused the terminal to appear stuck.
     instance.term.write(sanitized);
     return;
   }
@@ -276,7 +294,12 @@ export function writeToTerminal(sessionId: string, data: string): void {
   instance.term.write(sanitized, () => {
     // Re-check lock inside the callback: the user may have scrolled up between
     // the write() call and this callback — respect that intent.
-    if (!scrollLocked.get(sessionId)) instance.term.scrollToBottom();
+    if (!scrollLocked.get(sessionId)) {
+      // Suppress the scroll event fired by scrollToBottom() so it doesn't race
+      // with a concurrent buffer expansion and spuriously set scrollLocked=true.
+      suppressScrollEvents(sessionId);
+      instance.term.scrollToBottom();
+    }
   });
 }
 
@@ -306,6 +329,7 @@ export function scrollToBottom(sessionId: string): void {
   const instance = terminals.get(sessionId);
   if (instance) {
     scrollLocked.set(sessionId, false);
+    suppressScrollEvents(sessionId);
     instance.term.scrollToBottom();
   }
 }
