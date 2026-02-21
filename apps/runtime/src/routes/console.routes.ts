@@ -49,12 +49,29 @@ router.post('/create-shell', (req, res) => {
   }
 
   const { cwd } = req.body || {};
+
+  // Guard: respond within 10s no matter what — prevents daemon proxy 504 timeout.
+  let responded = false;
+  const timeout = setTimeout(() => {
+    if (!responded) {
+      responded = true;
+      console.error(`[Console] Shell creation timed out after 10s`);
+      res.status(500).json({ error: 'Shell creation timed out — check server logs' });
+    }
+  }, 10000);
+
   try {
     const session = createShellSession(cwd || undefined);
+    clearTimeout(timeout);
+    if (responded) return; // timeout already fired
+    responded = true;
     console.log(`[Console] Shell session created: ${session.id} (cwd: ${session.cwd})`);
     broadcastStatus();
     res.json({ sessionId: session.id, cwd: session.cwd, name: session.name });
   } catch (e) {
+    clearTimeout(timeout);
+    if (responded) return;
+    responded = true;
     const detail = e instanceof Error ? e.message : 'Failed to create shell session';
     console.log(`[Console] Shell session creation failed: ${detail}`);
     res.status(400).json({ error: 'Failed to create shell session' });

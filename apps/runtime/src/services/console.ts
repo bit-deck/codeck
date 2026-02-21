@@ -219,6 +219,7 @@ export function createConsoleSession(options?: string | CreateSessionOptions): C
 }
 
 export function createShellSession(cwd?: string): ConsoleSession {
+  const t0 = Date.now();
   const id = randomUUID();
   const workDir = resolve(cwd || process.env.WORKSPACE || '/workspace');
 
@@ -228,7 +229,7 @@ export function createShellSession(cwd?: string): ConsoleSession {
 
   const finalEnv = { ...buildCleanEnv(), TERM: 'xterm-256color' };
 
-  console.log(`[Console] Spawning shell PTY: cwd=${workDir}, sessions=${sessions.size}`);
+  console.log(`[Console] Shell: step1 env built +${Date.now() - t0}ms`);
 
   let pty: IPty;
   try {
@@ -245,11 +246,13 @@ export function createShellSession(cwd?: string): ConsoleSession {
     throw new Error(`Failed to spawn shell: ${msg}`);
   }
 
+  console.log(`[Console] Shell: step2 ptySpawn done +${Date.now() - t0}ms`);
+
   const name = 'Shell';
   const session: ConsoleSession = { id, type: 'shell', pty, cwd: workDir, name, createdAt: Date.now(), outputBuffer: [], outputBufferSize: 0, attached: false };
 
-  // Start session capture for transcript logging
   startSessionCapture(id, workDir);
+  console.log(`[Console] Shell: step3 capture started +${Date.now() - t0}ms`);
 
   pty.onData((data: string) => {
     captureOutput(id, data);
@@ -265,6 +268,7 @@ export function createShellSession(cwd?: string): ConsoleSession {
 
   sessions.set(id, session);
   saveSessionState('session_created');
+  console.log(`[Console] Shell: done +${Date.now() - t0}ms id=${id.slice(0,8)}`);
   return session;
 }
 

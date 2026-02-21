@@ -178,21 +178,9 @@ export function captureOutput(id: string, data: string): void {
 
   capture.outputBuffer += data;
 
-  // Check for compaction patterns in raw output
-  const clean = stripAnsi(data);
-  for (const pattern of COMPACTION_PATTERNS) {
-    if (pattern.test(clean)) {
-      writeLine(capture, {
-        ts: Date.now(),
-        role: 'system',
-        event: 'compaction_detected',
-        pattern: pattern.source,
-      });
-      console.log(`[SessionWriter] Compaction detected in session ${id}`);
-      if (compactionCallback) compactionCallback(id);
-      break;
-    }
-  }
+  // Compaction detection disabled — the broad regex patterns produced too many
+  // false positives (matching normal Claude output text like "context", "compact").
+  // The FREEZE DETECTED diagnostic in websocket.ts is more reliable.
 
   // Flush every 500ms or 2KB
   if (capture.outputBuffer.length >= 2048) {
