@@ -448,6 +448,23 @@ function handleConsoleMessage(ws: WebSocket, msg: { type: string; sessionId: str
         `recentBlock=${hadRecentBlock ? `${_lastBlockDuration}ms@${Math.round(recentBlockMs/1000)}s_ago` : 'none'}`
       );
 
+      // Attempt recovery: send SIGWINCH to the Claude Code process.
+      // SIGWINCH is harmless (just "window size changed") but interrupts blocked
+      // syscalls and libuv poll, potentially waking up a stalled Node.js event loop
+      // inside Claude Code. Combined with a no-op resize to force the PTY driver
+      // to deliver the signal.
+      if (ptyAlive && silentMs > 8000) {
+        try {
+          const dims = sessionMaxDimensions.get(msg.sessionId);
+          if (dims) {
+            resizeSession(msg.sessionId, dims.cols, dims.rows);
+          }
+          console.log(`[WS] SIGWINCH recovery sent to pid ${ptyPid}`);
+        } catch (e) {
+          console.warn(`[WS] SIGWINCH recovery failed: ${(e as Error).message}`);
+        }
+      }
+
       // Notify connected clients about the freeze so frontend can show an indicator
       if (clientSet) {
         const freezeMsg = JSON.stringify({
