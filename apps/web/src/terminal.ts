@@ -9,6 +9,7 @@ interface TerminalInstance {
   fitAddon: FitAddon;
   resizeObserver: ResizeObserver | null;
   container: HTMLElement;
+  textarea: HTMLTextAreaElement | null;
 }
 
 const terminals = new Map<string, TerminalInstance>();
@@ -141,6 +142,9 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
   }
 
   term.onData((data) => {
+    // Debug: confirms onData fires — if absent in DevTools Console (Verbose) during
+    // a freeze, the textarea lost focus and keystrokes are going to document.body.
+    console.debug(`[xterm] ${sessionId.slice(0,6)} onData ${data.length}B`);
     wsSend({ type: 'console:input', sessionId, data });
   });
 
@@ -189,7 +193,7 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
   });
   resizeObserver.observe(container);
 
-  const instance: TerminalInstance = { term, fitAddon, resizeObserver, container };
+  const instance: TerminalInstance = { term, fitAddon, resizeObserver, container, textarea };
   terminals.set(sessionId, instance);
   return instance;
 }
@@ -223,6 +227,11 @@ export function fitTerminal(sessionId: string): void {
   if (cw === 0 || ch === 0) { console.debug(`[fit] BAIL zero dims`); return; }
   const prevCols = instance.term.cols;
   const prevRows = instance.term.rows;
+  // Capture focus state before fit. fitAddon.fit() calls term.resize() internally
+  // when computed dims differ from current — term.resize() does DOM operations that
+  // can move focus from the xterm textarea to document.body, silently breaking
+  // keyboard input until the user clicks. We restore focus after if it was stolen.
+  const wasTerminalFocused = !isMobile.value && !!instance.textarea && document.activeElement === instance.textarea;
   const t0 = performance.now();
   instance.fitAddon.fit();
   const elapsed = (performance.now() - t0).toFixed(1);
@@ -242,6 +251,11 @@ export function fitTerminal(sessionId: string): void {
   // fitTerminal is called redundantly on WS reconnect, section switch, etc.
   if (instance.term.cols !== prevCols || instance.term.rows !== prevRows) {
     console.debug(`[fit] RESIZE ${prevCols}x${prevRows} → ${instance.term.cols}x${instance.term.rows} (${elapsed}ms)`);
+    // Restore focus if the resize stole it from the xterm textarea.
+    if (wasTerminalFocused && document.activeElement !== instance.textarea) {
+      console.debug(`[fit] ${sessionId.slice(0,6)} restoring focus after resize`);
+      instance.term.focus();
+    }
     wsSend({ type: 'console:resize', sessionId, cols: instance.term.cols, rows: instance.term.rows });
   } else {
     console.debug(`[fit] same dims ${instance.term.cols}x${instance.term.rows} (${elapsed}ms) — no resize sent`);

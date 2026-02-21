@@ -282,7 +282,15 @@ export function resizeSession(id: string, cols: number, rows: number): void {
 
 export function writeToSession(id: string, data: string): void {
   captureInput(id, data);
-  sessions.get(id)?.pty.write(data);
+  const session = sessions.get(id);
+  if (!session) {
+    // Session not found — input discarded. If this appears in logs during a freeze,
+    // the browser is sending console:input for a session that no longer exists
+    // (e.g. PTY exited silently and browser state is stale).
+    console.warn(`[Console] writeToSession: session ${id.slice(0,8)} NOT FOUND — input discarded (${data.length}B)`);
+    return;
+  }
+  session.pty.write(data);
 }
 
 export function destroySession(id: string): void {
