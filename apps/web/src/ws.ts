@@ -92,6 +92,7 @@ export function wsSend(msg: object): void {
       if (typeof sid === 'string' && !attachedSessions.has(sid)) {
         const arr = pendingInputs.get(sid) ?? [];
         if (!pendingInputs.has(sid)) pendingInputs.set(sid, arr);
+        if (arr.length === 0) console.warn(`[WS] Input buffering started for session ${sid.slice(0,8)} — WS connected but session not yet re-attached. Input will appear frozen until attach completes.`);
         if (arr.length < MAX_PENDING_INPUTS) arr.push(msg);
         return;
       }
@@ -109,6 +110,7 @@ export function wsSend(msg: object): void {
     const sid = (msg as any).sessionId;
     if (typeof sid === 'string') {
       const arr = pendingInputs.get(sid) ?? [];
+      if (arr.length === 0) console.warn(`[WS] Input buffering started for session ${sid.slice(0,8)} — WS disconnected. Input will appear frozen until WS reconnects and re-attaches.`);
       if (arr.length < MAX_PENDING_INPUTS) {
         if (!pendingInputs.has(sid)) pendingInputs.set(sid, arr);
         arr.push(msg);
@@ -172,7 +174,7 @@ function openWs(wsUrl: string): void {
     if (staleCheckTimer) clearInterval(staleCheckTimer);
     staleCheckTimer = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN && Date.now() - lastMessageAt > 45000) {
-        console.log('[WS] Connection stale (no data in 45s), reconnecting');
+        console.warn('[WS] Connection stale (no data in 45s) — closing to reconnect. If you see input freeze after this, the freeze is WS-reconnect latency, not JS.');
         ws.close();
       }
     }, 10000);
@@ -278,6 +280,7 @@ function openWs(wsUrl: string): void {
   };
 
   ws.onclose = () => {
+    console.warn(`[WS] Disconnected. reconnectAttempt=${reconnectAttempts} backoff=${reconnectBackoff}ms`);
     setWsConnected(false);
     // Do NOT set restoringPending here — a transient WS disconnect does not mean
     // sessions need to be restored (PTY is still running on the server).

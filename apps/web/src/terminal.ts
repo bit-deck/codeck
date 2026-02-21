@@ -75,6 +75,17 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
     textarea.setAttribute('autocapitalize', 'off');
     textarea.setAttribute('spellcheck', 'false');
     textarea.setAttribute('enterkeyhint', 'send');
+
+    // Track focus/blur on the xterm textarea — loss of focus means keyboard
+    // input stops working (keystrokes go to document.body instead of xterm).
+    // Open DevTools Console to see these events if input freezes while output works.
+    textarea.addEventListener('focus', () => {
+      console.debug(`[xterm] ${sessionId.slice(0,6)} textarea FOCUS`);
+    });
+    textarea.addEventListener('blur', () => {
+      const active = document.activeElement;
+      console.warn(`[xterm] ${sessionId.slice(0,6)} textarea BLUR — input will freeze until re-focused. activeElement=${active?.tagName}#${(active as HTMLElement)?.id || ''}.${(active as HTMLElement)?.className?.toString().split(' ').slice(0,2).join('.')}`);
+    });
   }
 
   // On mobile, disable xterm's textarea so our hidden input takes over.
@@ -146,6 +157,14 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
         const prevCols = term.cols;
         const prevRows = term.rows;
         fitAddon.fit();
+        // Guard: reject implausible dimensions from mid-transition containers.
+        // During CSS animations the container can briefly report near-zero width,
+        // causing fitAddon to compute cols<10. Sending that SIGWINCH breaks PTY
+        // line wrapping → "1 letter per line" on mobile.
+        if (term.cols < 10 || term.rows < 2) {
+          if (term.cols !== prevCols || term.rows !== prevRows) term.resize(prevCols, prevRows);
+          return;
+        }
         if (term.cols !== prevCols || term.rows !== prevRows) {
           console.debug(`[ResizeObserver] RESIZE ${prevCols}x${prevRows} → ${term.cols}x${term.rows}`);
           wsSend({ type: 'console:resize', sessionId, cols: term.cols, rows: term.rows });
@@ -193,16 +212,28 @@ export function fitTerminal(sessionId: string): void {
   if (cw === 0 || ch === 0) { console.debug(`[fit] BAIL zero dims`); return; }
   const prevCols = instance.term.cols;
   const prevRows = instance.term.rows;
+  const t0 = performance.now();
   instance.fitAddon.fit();
+  const elapsed = (performance.now() - t0).toFixed(1);
+  // Guard: reject implausible dimensions — can happen during CSS transitions when
+  // the container is mid-animation and reports a near-zero width. Sending a SIGWINCH
+  // with cols<10 breaks PTY line wrapping and causes "1 letter per line" rendering.
+  if (instance.term.cols < 10 || instance.term.rows < 2) {
+    console.warn(`[fit] ${sessionId.slice(0,6)} BAIL implausible dims ${instance.term.cols}x${instance.term.rows} — reverting (${elapsed}ms)`);
+    if (instance.term.cols !== prevCols || instance.term.rows !== prevRows) {
+      instance.term.resize(prevCols, prevRows);
+    }
+    return;
+  }
   // Only send console:resize if dimensions actually changed — avoids sending
   // SIGWINCH to the running process when the terminal size is already correct.
   // This prevents unnecessary process redraws (and brief input freezes) when
   // fitTerminal is called redundantly on WS reconnect, section switch, etc.
   if (instance.term.cols !== prevCols || instance.term.rows !== prevRows) {
-    console.debug(`[fit] RESIZE ${prevCols}x${prevRows} → ${instance.term.cols}x${instance.term.rows}`);
+    console.debug(`[fit] RESIZE ${prevCols}x${prevRows} → ${instance.term.cols}x${instance.term.rows} (${elapsed}ms)`);
     wsSend({ type: 'console:resize', sessionId, cols: instance.term.cols, rows: instance.term.rows });
   } else {
-    console.debug(`[fit] same dims ${instance.term.cols}x${instance.term.rows} — no resize sent`);
+    console.debug(`[fit] same dims ${instance.term.cols}x${instance.term.rows} (${elapsed}ms) — no resize sent`);
   }
 }
 
@@ -210,32 +241,28 @@ export function fitTerminal(sessionId: string): void {
  * Force xterm to reposition its viewport and repaint after a terminal container
  * becomes visible (e.g. display:none → display:block).
  *
- * Problem: when the terminal was hidden, xterm's cols/rows are already at the
- * correct values from a previous fit. When the container becomes visible and
- * fitAddon.fit() runs, term.resize() receives the same dims → xterm skips the
- * resize → syncScrollArea() never runs → viewport stays at scroll position 0
- * (top of scrollback / blank area) → terminal appears black.
+ * Previously used a micro-resize trick (term.resize(cols, rows+1) then back) to
+ * force syncScrollArea(). This caused O(N) scrollback buffer reallocation — with
+ * 1000 lines of output it blocked the main thread for 1–5 seconds, freezing input.
  *
- * Fix: micro-resize (+1 row then back). This forces two calls to syncScrollArea()
- * with different dims, which repositions ydisp to show the cursor (bottom of
- * buffer). Called directly on term — no WS message sent, no SIGWINCH to PTY.
+ * Fix: fitAddon.fit() handles any dimension mismatch. The manual viewport.scrollTop
+ * assignment and term.scrollToBottom() achieve the same scroll sync, and term.refresh()
+ * redraws the canvas — without touching the buffer.
  */
 export function repaintTerminal(sessionId: string): void {
   const instance = terminals.get(sessionId);
   if (!instance) return;
-  const cw2 = instance.container.offsetWidth, ch2 = instance.container.offsetHeight;
-  console.debug(`[repaint] ${sessionId.slice(0,6)} container=${cw2}x${ch2} term=${instance.term.cols}x${instance.term.rows} scrollLocked=${scrollLocked.get(sessionId)}`);
-  if (cw2 === 0 || ch2 === 0) { console.debug(`[repaint] BAIL zero dims`); return; }
-  // Ensure terminal canvas matches the current container size before micro-resizing.
-  // If fitTerminal previously bailed (container was hidden → 0 height), the canvas
-  // might be at xterm's default 80×24 even though the container is now 600px tall.
-  // fitAddon.fit() recalculates correct cols/rows from the container and resizes
-  // internally. This does NOT send SIGWINCH — callers should call fitTerminal()
-  // first if they also need the server/PTY to know the new dimensions.
+  const cw = instance.container.offsetWidth, ch = instance.container.offsetHeight;
+  console.debug(`[repaint] ${sessionId.slice(0,6)} container=${cw}x${ch} term=${instance.term.cols}x${instance.term.rows} scrollLocked=${scrollLocked.get(sessionId)}`);
+  if (cw === 0 || ch === 0) { console.debug(`[repaint] BAIL zero dims`); return; }
+  // fitAddon.fit() is a no-op if dims haven't changed (deduplication guard inside FitAddon).
+  // Calling it here handles the case where the container was resized after the last fitTerminal.
+  // Does NOT send SIGWINCH — callers should call fitTerminal() first if they need PTY to know
+  // the new dimensions.
+  const t0 = performance.now();
   instance.fitAddon.fit();
-  const { cols, rows } = instance.term;
-  instance.term.resize(cols, rows + 1);
-  instance.term.resize(cols, rows);
+  const t1 = performance.now();
+  const { rows } = instance.term;
   // repaintTerminal is called explicitly to bring the terminal into view —
   // always scroll to bottom regardless of scroll lock. The scroll lock reflects
   // user intent during normal reading, but repaint is triggered by system events
@@ -249,6 +276,15 @@ export function repaintTerminal(sessionId: string): void {
   const viewport = instance.container.querySelector('.xterm-viewport') as HTMLElement | null;
   if (viewport) { suppressScrollEvents(sessionId); viewport.scrollTop = viewport.scrollHeight; }
   instance.term.refresh(0, rows - 1);
+  const t2 = performance.now();
+  const fitMs = (t1 - t0).toFixed(1), refreshMs = (t2 - t1).toFixed(1), totalMs = (t2 - t0).toFixed(1);
+  // Warn on any repaint >20ms — these show up in DevTools Console without verbose enabled
+  // and help correlate slow repaints with user-reported input freeze moments.
+  if (parseFloat(totalMs) > 20) {
+    console.warn(`[repaint] ${sessionId.slice(0,6)} SLOW ${totalMs}ms (fit=${fitMs}ms refresh=${refreshMs}ms rows=${rows})`);
+  } else {
+    console.debug(`[repaint] ${sessionId.slice(0,6)} done ${totalMs}ms (fit=${fitMs}ms refresh=${refreshMs}ms)`);
+  }
 }
 
 /** Returns the current terminal dimensions, or null if not found / hidden. */

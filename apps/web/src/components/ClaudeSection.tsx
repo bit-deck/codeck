@@ -186,12 +186,18 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
     // Fire when connection is established AND restore overlay has cleared.
     if (!isConnected || isRestoring) return;
     if (!activeId) return;
-    // Small delay to let buffer replay and WS attach settle.
-    const t = setTimeout(() => {
-      fitTerminal(activeId);
-      repaintTerminal(activeId);
-    }, 800);
-    return () => clearTimeout(t);
+    // Multiple retries to handle different timing scenarios:
+    //   200ms  — fast path: session already attached, layout already set
+    //   800ms  — normal path: buffer replay + WS settle complete
+    //   1500ms — slow path: server restart, slow PTY replay, mobile layout delay
+    // Each retry is a no-op if the terminal is already painted correctly.
+    const id = activeId;
+    const timers = [200, 800, 1500].map(ms => setTimeout(() => {
+      if (!getTerminal(id)) return;
+      fitTerminal(id);
+      repaintTerminal(id);
+    }, ms));
+    return () => timers.forEach(clearTimeout);
   }, [isConnected, isRestoring, activeId]);
 
   // Toggle visible terminal when active tab changes
@@ -208,23 +214,19 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
     // this tab was active (80x24 default) — after reflow the viewport can be
     // anywhere, so we always land at the latest content on tab switch.
     // repaintTerminal: force xterm to reposition its viewport after becoming
-    // visible. fitAddon.fit() with unchanged dims is a no-op (term.resize not
-    // called → syncScrollArea never runs → canvas stays black). The micro-resize
-    // trick forces syncScrollArea regardless of whether dimensions changed.
+    // visible. Calls fitAddon.fit() for any size mismatch, then scrolls to
+    // bottom and redraws the canvas without touching the scrollback buffer.
     requestAnimationFrame(() => {
       fitTerminal(activeId);
       requestAnimationFrame(() => repaintTerminal(activeId));
       scrollToBottom(activeId);
       focusTerminal(activeId);
     });
-    // Belt-and-suspenders: retry fitTerminal at 100ms and 400ms.
-    // On mobile, recalcLayout may not have set .terminal-instances height by
-    // the time the first rAF fires (~16ms) — the container still reports 0.
-    // fitTerminal deduplicates SIGWINCH (only sends when cols/rows change),
-    // so multiple calls are safe — only the first successful one sends resize.
-    const id = activeId;
-    setTimeout(() => { fitTerminal(id); requestAnimationFrame(() => repaintTerminal(id)); }, 100);
-    setTimeout(() => { fitTerminal(id); requestAnimationFrame(() => repaintTerminal(id)); }, 400);
+    // attachSettleRepaint provides the safety net for cases where the container
+    // has zero height during the initial rAF (e.g. mobile recalcLayout hasn't
+    // run yet). No need for additional setTimeout retries here — repaintTerminal
+    // is now O(1) rather than O(N scrollback), so the stabilization retries in
+    // attachSettleRepaint are sufficient without extra calls on tab switch.
   }, [activeId]);
 
   function startEditingTab(id: string, currentName: string) {
