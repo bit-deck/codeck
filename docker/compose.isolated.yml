@@ -57,7 +57,7 @@ services:
       - /run/dbus:size=10M,mode=0755
       - /var/run:size=10M,mode=0755
     volumes:
-      - workspace:/workspace
+      - ${CODECK_WORKSPACE:-workspace}:/workspace
       - claude-config:/root/.claude
       - ssh-data:/root/.ssh
       - gh-config:/root/.config/gh

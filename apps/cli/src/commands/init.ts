@@ -1,16 +1,73 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as p from '@clack/prompts';
-import { existsSync, unlinkSync } from 'node:fs';
-import { resolve, join } from 'node:path';
-import { getConfig, setConfig, isInitialized, type CodeckMode } from '../lib/config.js';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { resolve, join, basename } from 'node:path';
+import { execSync } from 'node:child_process';
+import { getConfig, setConfig, isInitialized, clearWorkspacePath, type CodeckMode } from '../lib/config.js';
 import { detectOS, isDockerInstalled, isDockerRunning, isPortAvailable, isBaseImageBuilt } from '../lib/detect.js';
 import { generateOverrideYaml, generateEnvFile, writeOverrideFile, writeEnvFile, readEnvFile } from '../lib/compose.js';
 import { buildBaseImage } from '../lib/docker.js';
 
+/**
+ * Derive the Docker Compose project name from projectPath.
+ * Docker Compose uses the directory basename, lowercased, non-alphanumeric chars
+ * replaced with hyphens, leading/trailing hyphens stripped.
+ */
+function composeProjectName(projectPath: string): string {
+  return basename(resolve(projectPath))
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/^-+|-+$/g, '') || 'codeck';
+}
+
+/**
+ * Check whether the named volume used in isolated mode has any data.
+ * Returns false if the volume does not exist.
+ */
+function checkNamedVolumeHasData(projectPath: string): boolean {
+  const volumeName = `${composeProjectName(projectPath)}_workspace`;
+  try {
+    execSync(`docker volume inspect ${volumeName}`, { stdio: 'pipe' });
+    const result = execSync(
+      `docker run --rm -v ${volumeName}:/check alpine sh -c "[ -n \\"$(ls -A /check)\\" ] && echo yes || echo no"`,
+      { encoding: 'utf8', stdio: 'pipe' }
+    );
+    return result.trim() === 'yes';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copy data from the named workspace volume to a host path.
+ * Prompts the user before proceeding; no-ops if there is nothing to migrate.
+ */
+async function migrateNamedVolumeToBindMount(targetPath: string, projectPath: string): Promise<void> {
+  const hasData = checkNamedVolumeHasData(projectPath);
+  if (!hasData) return;
+
+  const confirm = await p.confirm({
+    message: `Named volume has existing data. Migrate to ${targetPath}? (recommended)`,
+    initialValue: true,
+  });
+  if (p.isCancel(confirm) || !confirm) return;
+
+  mkdirSync(targetPath, { recursive: true });
+
+  const volumeName = `${composeProjectName(projectPath)}_workspace`;
+  execSync(
+    `docker run --rm -v ${volumeName}:/src:ro -v "${targetPath}:/dst" alpine sh -c "cp -a /src/. /dst/"`,
+    { stdio: 'inherit' }
+  );
+
+  p.log.success(`Workspace data migrated to ${targetPath}`);
+}
+
 export const initCommand = new Command('init')
   .description('Interactive setup wizard for Codeck')
   .option('--rebuild-base', 'Force rebuild the base Docker image')
+  .option('--workspace <path>', 'Host path to bind-mount as /workspace (default: Docker named volume)')
   .action(async (opts) => {
     p.intro(chalk.bold('Codeck Setup'));
 
@@ -95,6 +152,42 @@ export const initCommand = new Command('init')
         process.exit(0);
       }
       projectPath = resolve(pathResult);
+    }
+
+    // 3b. Workspace storage mode
+    let workspacePath: string | undefined;
+
+    if (opts.workspace) {
+      // --workspace flag provided — resolve to absolute path
+      workspacePath = resolve(opts.workspace);
+    } else {
+      const defaultExistingPath = existingConfig?.workspacePath || '';
+      const storageMode = await p.select({
+        message: 'Workspace storage:',
+        options: [
+          { value: 'volume', label: 'Named volume', hint: 'Fast, isolated — default' },
+          { value: 'bind', label: 'Bind mount', hint: 'Host path — accessible from your OS' },
+        ],
+        initialValue: defaultExistingPath ? 'bind' : 'volume',
+      });
+      if (p.isCancel(storageMode)) {
+        p.outro(chalk.red('Setup cancelled.'));
+        process.exit(0);
+      }
+
+      if (storageMode === 'bind') {
+        const defaultPath = defaultExistingPath || './codeck-workspace';
+        const wsPathResult = await p.text({
+          message: 'Host path for workspace:',
+          placeholder: defaultPath,
+          defaultValue: defaultPath,
+        });
+        if (p.isCancel(wsPathResult)) {
+          p.outro(chalk.red('Setup cancelled.'));
+          process.exit(0);
+        }
+        workspacePath = resolve(wsPathResult || defaultPath);
+      }
     }
 
     // Read existing .env for defaults
@@ -206,6 +299,11 @@ export const initCommand = new Command('init')
     });
     const apiKey = p.isCancel(apiKeyResult) ? defaultApiKey : (apiKeyResult || defaultApiKey);
 
+    // 8b. Migrate named volume → bind mount if user switched storage modes
+    if (workspacePath) {
+      await migrateNamedVolumeToBindMount(workspacePath, projectPath);
+    }
+
     // 9. Generate files
     const s = p.spinner();
     s.start('Generating configuration files...');
@@ -222,6 +320,7 @@ export const initCommand = new Command('init')
     } else {
       envVars.CODECK_PORT = String(port);
     }
+    if (workspacePath) envVars.CODECK_WORKSPACE = workspacePath;
     if (ghToken) envVars.GITHUB_TOKEN = ghToken;
     if (apiKey) envVars.ANTHROPIC_API_KEY = apiKey;
 
@@ -256,7 +355,12 @@ export const initCommand = new Command('init')
       mode: codeckMode,
       initialized: true,
       os,
+      workspacePath,
     });
+    // If switching back to named volume, remove the old workspacePath from config
+    if (!workspacePath) {
+      clearWorkspacePath();
+    }
 
     // 11. Build base image if needed
     const baseBuilt = await isBaseImageBuilt();

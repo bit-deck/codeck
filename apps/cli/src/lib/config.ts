@@ -13,6 +13,7 @@ export interface CodeckConfig {
   initialized: boolean;
   os: 'windows' | 'macos' | 'linux';
   lanPid?: number;
+  workspacePath?: string; // absolute host path for bind mount; undefined = named volume
 }
 
 const schema = {
@@ -24,6 +25,7 @@ const schema = {
   initialized: { type: 'boolean' as const, default: false },
   os: { type: 'string' as const, default: 'linux', enum: ['windows', 'macos', 'linux'] },
   lanPid: { type: 'number' as const },
+  workspacePath: { type: 'string' as const },
 };
 
 const config = new Conf<CodeckConfig>({
@@ -47,6 +49,7 @@ export function getConfig(): CodeckConfig {
     initialized: config.get('initialized'),
     os: config.get('os'),
     lanPid: config.get('lanPid'),
+    workspacePath: config.get('workspacePath'),
   };
 }
 
@@ -101,6 +104,10 @@ export function getConfigPath(): string {
 
 export function deleteLanPid(): void {
   withConfigLock(() => config.delete('lanPid'));
+}
+
+export function clearWorkspacePath(): void {
+  withConfigLock(() => config.delete('workspacePath'));
 }
 
 export function resetConfig(): void {
