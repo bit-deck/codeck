@@ -137,36 +137,48 @@ export function createTerminal(sessionId: string, container: HTMLElement): Termi
     wsSend({ type: 'console:input', sessionId, data });
   });
 
-  // Debounce resize to avoid excessive events on mobile orientation changes.
-  // Deduplicates SIGWINCH: only sends console:resize when cols/rows actually change.
+  // Debounce resize to avoid excessive events on orientation changes / keyboard.
+  // Single resize path for both mobile and desktop: ResizeObserver → fit → send.
+  // After fit, scrollToBottom runs synchronously in the same JS task so the browser
+  // paints both changes in one frame (no scroll flash).
   let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-  const resizeObserver = new ResizeObserver(() => {
+  let lastContainerWidth = -1;
+  let lastContainerHeight = -1;
+  const resizeObserver = new ResizeObserver((entries) => {
+    // Dedup: skip if container dimensions haven't actually changed.
+    // This prevents feedback loops where fitAddon.fit() adjusts xterm's
+    // internal canvas, triggering another ResizeObserver notification.
+    const entry = entries[0];
+    const w = entry?.contentRect?.width ?? container.offsetWidth;
+    const h = entry?.contentRect?.height ?? container.offsetHeight;
+    if (w === lastContainerWidth && h === lastContainerHeight) return;
+    lastContainerWidth = w;
+    lastContainerHeight = h;
+
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
-      if (container.offsetWidth > 0 && container.offsetHeight > 0) {
-        const prevCols = term.cols;
-        const prevRows = term.rows;
-        // Capture focus state before fit — term.resize() can steal focus
-        const wasTerminalFocused = !isMobile.value && !!textarea && document.activeElement === textarea;
-        fitAddon.fit();
-        // Guard: reject implausible dimensions from mid-transition containers
-        if (term.cols < 10 || term.rows < 2) {
-          if (term.cols !== prevCols || term.rows !== prevRows) term.resize(prevCols, prevRows);
-          return;
-        }
-        if (term.cols !== prevCols || term.rows !== prevRows) {
-          wsSend({ type: 'console:resize', sessionId, cols: term.cols, rows: term.rows });
-        }
-        // Restore focus if term.resize() stole it from the textarea
-        if (wasTerminalFocused && document.activeElement !== textarea) {
-          term.focus();
-        }
-        // After fit, scroll to bottom so content is visible (fit may change row count)
-        if (isMobile.value && !scrollLocked.get(sessionId)) {
-          term.scrollToBottom();
-        }
+      if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
+      const prevCols = term.cols;
+      const prevRows = term.rows;
+      const wasTerminalFocused = !isMobile.value && !!textarea && document.activeElement === textarea;
+      fitAddon.fit();
+      // Guard: reject implausible dimensions from mid-transition containers
+      if (term.cols < 10 || term.rows < 2) {
+        if (term.cols !== prevCols || term.rows !== prevRows) term.resize(prevCols, prevRows);
+        return;
       }
-    }, isMobile.value ? 200 : 50);
+      if (term.cols !== prevCols || term.rows !== prevRows) {
+        wsSend({ type: 'console:resize', sessionId, cols: term.cols, rows: term.rows });
+      }
+      if (wasTerminalFocused && document.activeElement !== textarea) {
+        term.focus();
+      }
+      // Scroll to bottom after fit — same JS task, single browser paint
+      if (!scrollLocked.get(sessionId)) {
+        suppressScrollEvents(sessionId);
+        term.scrollToBottom();
+      }
+    }, isMobile.value ? 150 : 100);
   });
   resizeObserver.observe(container);
 

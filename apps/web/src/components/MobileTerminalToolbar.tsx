@@ -56,57 +56,17 @@ function tap(fn: () => void) {
   };
 }
 
-// Debounced fitTerminal: collapses overlapping calls into one, firing 350ms after
-// the last recalcLayout. Prevents reflow thrashing when multiple layout events
-// (visualViewport resize, onFocus, etc.) fire in rapid succession during typing.
-let fitDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-function debouncedFitTerminal(sessionId: string): void {
-  if (fitDebounceTimer) clearTimeout(fitDebounceTimer);
-  fitDebounceTimer = setTimeout(() => {
-    fitDebounceTimer = null;
-    fitTerminal(sessionId);
-  }, 350);
-}
-
-/** Calculate and set terminal height to fill space between tabs and toolbar. */
-function recalcLayout(sessionId: string | undefined) {
-  const vh = window.visualViewport?.height ?? window.innerHeight;
+/**
+ * With interactive-widget=resizes-content and the toolbar in normal flex flow,
+ * CSS handles all layout automatically. This helper only exists for cases where
+ * we need to explicitly re-fit the terminal (section switch, mount).
+ * ResizeObserver handles keyboard open/close fits automatically.
+ */
+function manualFit(sessionId: string | undefined) {
+  if (!sessionId) return;
   const tabs = document.querySelector('.terminal-tabs');
-  const toolbar = document.querySelector('.mobile-toolbar');
-  const instances = document.querySelector('.terminal-instances') as HTMLElement | null;
-  if (!instances) return;
-
-  const tabsH = tabs?.getBoundingClientRect().height ?? 0;
-
-  // getBoundingClientRect() returns coordinates relative to the visual viewport.
-  // When the keyboard is open, the toolbar (position:fixed; bottom:0) may be below
-  // the visual viewport on Android (fixed to layout viewport, not visual viewport).
-  // On iOS Safari it stays above the keyboard. Only subtract toolbar height if it's
-  // actually visible in the current visual viewport.
-  const toolbarRect = toolbar?.getBoundingClientRect();
-  const toolbarInView = toolbarRect ? toolbarRect.top < vh - 10 : false;
-  const toolbarH = toolbarInView ? (toolbarRect?.height ?? 0) : 0;
-
-  // If .terminal-tabs has zero height the Claude section is hidden (display:none
-  // parent). In that case tabsH=0 so we'd compute an oversized available height,
-  // causing fitTerminal to resize the terminal to too many rows. Use an estimated
-  // tab bar height instead so the height stored in CSS is close to correct, and
-  // skip fitTerminal (wrong dims would be sent as SIGWINCH to the PTY).
-  const tabsVisible = tabsH > 0;
-  const effectiveTabsH = tabsVisible ? tabsH : 44; // 44px typical mobile tab bar
-  const available = Math.max(50, vh - effectiveTabsH - toolbarH - 2);
-
-  console.debug(`[recalcLayout] vh=${vh} tabsH=${tabsH} (visible=${tabsVisible}) toolbarH=${toolbarH} available=${available} sessionId=${sessionId?.slice(0,6)}`);
-  instances.style.height = `${available}px`;
-  instances.style.maxHeight = `${available}px`;
-
-  // Only call fitTerminal when the section is actually visible — otherwise the
-  // container dimensions are estimated and would produce incorrect cols/rows.
-  if (sessionId && tabsVisible) {
-    requestAnimationFrame(() => scrollToBottom(sessionId));
-    debouncedFitTerminal(sessionId);
-  }
+  if (!tabs || tabs.getBoundingClientRect().height === 0) return; // section hidden
+  fitTerminal(sessionId);
 }
 
 export function MobileTerminalToolbar() {
@@ -219,33 +179,14 @@ export function MobileTerminalToolbar() {
   // --- Layout: calculate terminal height to fill space above fixed toolbar ---
 
   useEffect(() => {
-    // Call immediately so .terminal-instances gets its explicit height BEFORE any
-    // rAF callbacks run (fitTerminal bails if container height is 0). The 50ms
-    // delay that was here caused fitTerminal to bail in ClaudeSection's useEffect
-    // rAF (~16ms), leaving the terminal at xterm's default 80×24 dims → black screen.
-    recalcLayout(sessionId);
-    // Schedule a settle recalc for after fonts/layout finish loading.
-    const timer = setTimeout(() => recalcLayout(sessionId), 150);
+    // Fit after toolbar expand/collapse changes the available terminal space.
+    // Short delay lets the CSS transition settle before measuring.
+    const timer = setTimeout(() => manualFit(sessionId), 100);
     return () => clearTimeout(timer);
   }, [expanded, sessionId]);
 
-  useEffect(() => {
-    let settleTimer: ReturnType<typeof setTimeout>;
-    const handler = () => {
-      // Fire immediately for a responsive feel during keyboard animation,
-      // then schedule a final recalc after events settle (keyboard fully open/closed).
-      recalcLayout(sessionId);
-      clearTimeout(settleTimer);
-      settleTimer = setTimeout(() => recalcLayout(sessionId), 150);
-    };
-    window.visualViewport?.addEventListener('resize', handler);
-    window.addEventListener('resize', handler);
-    return () => {
-      clearTimeout(settleTimer);
-      window.visualViewport?.removeEventListener('resize', handler);
-      window.removeEventListener('resize', handler);
-    };
-  }, [sessionId]);
+  // No visualViewport listener needed — ResizeObserver on the terminal container
+  // handles fits when the viewport resizes (keyboard open/close, orientation).
 
   // --- Recalc when section switches to 'claude' ---
   // When the user navigates to the Claude section, .terminal-tabs becomes visible
@@ -256,13 +197,11 @@ export function MobileTerminalToolbar() {
   const currentSection = activeSection.value;
   useEffect(() => {
     if (currentSection === 'claude') {
-      recalcLayout(sessionId);
-      // After recalcLayout sets correct height and its 250ms fitTerminal runs,
-      // call repaintTerminal to force xterm to scroll to the current output position.
+      // After switching to terminal section, fit and repaint
       const t = setTimeout(() => {
-        recalcLayout(sessionId);
+        manualFit(sessionId);
         if (sessionId) repaintTerminal(sessionId);
-      }, 350);
+      }, 100);
       return () => clearTimeout(t);
     }
   }, [currentSection, sessionId]);
@@ -317,19 +256,17 @@ export function MobileTerminalToolbar() {
         enterkeyhint="send"
         aria-label="Terminal keyboard input"
         role="textbox"
+        data-form-type="other"
+        data-lpignore="true"
         onKeyDown={handleKeyDown}
         onInput={handleInput}
         onFocus={() => {
           resetInput();
           if (sessionId) scrollToBottom(sessionId);
-          // visualViewport.resize already handles keyboard-open layout updates
-          // with its own debounce — no extra timers needed here. They were the
-          // primary source of reflow thrashing during active typing.
         }}
         onBlur={() => {
-          // Keyboard closing — recalc at multiple points to catch slow animations.
-          setTimeout(() => recalcLayout(sessionId), 300);
-          setTimeout(() => recalcLayout(sessionId), 500);
+          // Keyboard closing — scroll to bottom after animation settles.
+          setTimeout(() => { if (sessionId) scrollToBottom(sessionId); }, 400);
         }}
       />
 

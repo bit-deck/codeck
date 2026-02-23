@@ -12,6 +12,25 @@ function detectMobile(): boolean {
 
 export const isMobile = signal(detectMobile());
 
+// Mobile keyboard open state — driven by visualViewport height changes.
+// When the keyboard opens, the viewport shrinks significantly (>25% smaller than
+// the initial height). This is more reliable than focus/blur on the hidden input
+// because some browsers don't fire blur when the keyboard dismisses via gesture.
+export const mobileKeyboardOpen = signal(false);
+
+if (typeof window !== 'undefined') {
+  const initialVvHeight = window.visualViewport?.height ?? window.innerHeight;
+  const KEYBOARD_THRESHOLD = 0.75; // keyboard is open if viewport < 75% of initial
+
+  const updateKeyboardState = () => {
+    if (!isMobile.value) return;
+    const currentHeight = window.visualViewport?.height ?? window.innerHeight;
+    mobileKeyboardOpen.value = currentHeight < initialVvHeight * KEYBOARD_THRESHOLD;
+  };
+
+  window.visualViewport?.addEventListener('resize', updateKeyboardState);
+}
+
 // Reactively update isMobile when pointer capability or screen size changes
 // (e.g., device rotation, toggling mobile emulation in DevTools).
 if (typeof window !== 'undefined') {

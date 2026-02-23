@@ -1664,9 +1664,8 @@
   .setup-card { padding: 28px 20px; }
 
   /* Auth view: anchor card to top so keyboard doesn't cover inputs.
-   * The viewport meta is interactive-widget=overlays-content so the keyboard
-   * overlays the layout without resizing it. Centering the card vertically puts
-   * inputs right behind the keyboard on small screens. */
+   * With resizes-content the viewport shrinks when keyboard opens —
+   * anchoring to top keeps the card visible and scrollable. */
   .view-setup {
     align-items: flex-start;
     padding: 40px 0 80px;
@@ -2297,13 +2296,12 @@
   100% { opacity: 0; transform: translate(-50%, -50%) scale(0.95); }
 }
 
-/* --- Toolbar: position fixed at bottom, always visible --- */
+/* --- Toolbar: normal flow inside .claude-content flex column --- */
+/* With resizes-content, the browser shrinks the viewport when the keyboard opens.
+   The toolbar sits at the bottom of the flex column, naturally above the keyboard.
+   No position:fixed needed — flex layout handles placement. */
 .mobile-toolbar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 50;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -2471,11 +2469,11 @@
 
 /* --- Mobile terminal layout adjustments --- */
 
-/* Terminal is strictly sized by JS (recalcLayout) to fit between tabs and toolbar.
-   flex: none prevents flex from overriding the calculated height.
-   overflow: hidden ensures xterm never pushes the container larger. */
+/* Terminal fills remaining space in the flex column (after tabs and toolbar).
+   With resizes-content, the viewport shrinks with the keyboard, and flex
+   distributes the space automatically — no JS height calculation needed. */
 .claude-content.mobile-terminal .terminal-instances {
-  flex: none !important;
+  flex: 1 1 0 !important;
   min-height: 0;
   overflow: hidden !important;
   cursor: text;

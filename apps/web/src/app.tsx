@@ -1,7 +1,7 @@
 import { Component } from 'preact';
 import { useEffect, useState, useRef } from 'preact/hooks';
 import {
-  view, activeSection, claudeAuthenticated, presetConfigured, isMobile,
+  view, activeSection, claudeAuthenticated, presetConfigured, isMobile, mobileKeyboardOpen,
   updateStateFromServer, setView, setActiveSection, setAuthMode, setActiveSessionId,
   setPresetConfigured, setAccountInfo,
   sessions, activeSessionId, addSession, removeSession, replaceSession,
@@ -421,7 +421,7 @@ export function App() {
       <Sidebar onSectionChange={handleSectionChange} mobileOpen={false} onClose={() => {}} collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(c => !c)} />
       <MobileMenu open={sidebarOpen} onClose={() => setSidebarOpen(false)} onSectionChange={handleSectionChange} />
       <div class="content-area">
-        <header class="mobile-header">
+        <header class="mobile-header" style={mobileKeyboardOpen.value ? 'display:none' : ''}>
           <button class={`hamburger-btn${sidebarOpen ? ' open' : ''}`} onClick={() => setSidebarOpen(o => !o)} aria-label={sidebarOpen ? 'Close menu' : 'Open menu'} aria-expanded={sidebarOpen}>
             {sidebarOpen ? (
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -456,7 +456,7 @@ export function App() {
             {section === 'settings' && <SettingsSection />}
           </ErrorBoundary>
         </main>
-        <LogsDrawer />
+        {!mobileKeyboardOpen.value && <LogsDrawer />}
       </div>
       <LoginModal visible={loginModalOpen} onClose={handleLoginClose} onSuccess={handleLoginSuccess} />
       <NewProjectModal visible={newProjectOpen} onCancel={() => setNewProjectOpen(false)} onConfirm={handleProjectConfirm} />

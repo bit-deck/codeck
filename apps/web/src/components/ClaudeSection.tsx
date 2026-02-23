@@ -42,12 +42,15 @@ function attachSettleRepaint(sessionId: string): void {
     fitTerminal(sessionId);
     repaintTerminal(sessionId);
 
-    // Single stabilization retry — safety net for hidden containers or slow layout
-    setTimeout(() => {
-      if (!getTerminal(sessionId)) return;
-      fitTerminal(sessionId);
-      repaintTerminal(sessionId);
-    }, 500);
+    // Single stabilization retry — safety net for hidden containers or slow layout.
+    // Only on mobile — desktop ResizeObserver handles layout changes reliably.
+    if (isMobile.value) {
+      setTimeout(() => {
+        if (!getTerminal(sessionId)) return;
+        fitTerminal(sessionId);
+        repaintTerminal(sessionId);
+      }, 500);
+    }
   };
 }
 
@@ -123,6 +126,29 @@ export function ClaudeSection({ onNewSession, onNewShell }: ClaudeSectionProps) 
       });
     }
 
+    // Safety repaint for the active terminal — catches cases where the initial
+    // attach/settle/repaint cycle doesn't paint (e.g., idle session with no buffer
+    // replay, or xterm canvas not ready during the first fit cycle).
+    // Only on mobile — desktop ResizeObserver handles it reliably.
+    // Retries up to 3 times (500ms apart) if the container still has zero dimensions.
+    if (isMobile.value && activeId && getTerminal(activeId)) {
+      let attempts = 0;
+      const maxAttempts = 3;
+      let safetyTimer: ReturnType<typeof setTimeout>;
+      const tryRepaint = () => {
+        const inst = getTerminal(activeId);
+        if (!inst) return;
+        attempts++;
+        if (inst.container.offsetWidth === 0 || inst.container.offsetHeight === 0) {
+          if (attempts < maxAttempts) { safetyTimer = setTimeout(tryRepaint, 500); }
+          return;
+        }
+        fitTerminal(activeId);
+        repaintTerminal(activeId);
+      };
+      safetyTimer = setTimeout(tryRepaint, 500);
+      return () => clearTimeout(safetyTimer);
+    }
   }, [sessionList.length]);
 
   // Toggle visible terminal when active tab changes
