@@ -28,7 +28,6 @@ let staleCheckTimer: ReturnType<typeof setInterval> | null = null;
 let lastMessageAt = 0;
 let reconnectBackoff = 500; // Exponential backoff: 0.5s → 1s → 2s → ... → 15s cap
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 15;
 
 // True only on the first status message after a WS reconnect.
 // Prevents onSessionReattached from firing on every status broadcast
@@ -247,12 +246,6 @@ function openWs(wsUrl: string): void {
     setWsConnected(false);
     ws = null;
     if (staleCheckTimer) { clearInterval(staleCheckTimer); staleCheckTimer = null; }
-
-    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      addLog({ type: 'error', message: 'Unable to reach server after multiple attempts', timestamp: Date.now() });
-      setRestoringPending(false);
-      return;
-    }
 
     const delay = reconnectAttempts === 0 ? 50 : reconnectBackoff * (0.5 + Math.random() * 0.5);
     reconnectAttempts++;

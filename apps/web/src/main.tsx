@@ -6,3 +6,8 @@ import './styles/global.css';
 import './styles/app.css';
 
 render(<App />, document.getElementById('app')!);
+
+// Register service worker for PWA installability (standalone mode, no browser URL bar)
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
