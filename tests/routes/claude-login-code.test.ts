@@ -12,10 +12,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import agentRoutes from '../../src/routes/agent.routes.js';
+import agentRoutes from '../../apps/runtime/src/routes/agent.routes.js';
 
 // Mock the dependencies
-vi.mock('../../src/services/auth-anthropic.js', () => ({
+vi.mock('../../apps/runtime/src/services/auth-anthropic.js', () => ({
   getClaudeStatus: vi.fn(() => ({
     installed: true,
     authenticated: false,
@@ -36,7 +36,7 @@ vi.mock('../../src/services/auth-anthropic.js', () => ({
   sendLoginCode: vi.fn(),
 }));
 
-vi.mock('../../src/web/websocket.js', () => ({
+vi.mock('../../apps/runtime/src/web/websocket.js', () => ({
   broadcastStatus: vi.fn(),
 }));
 
@@ -70,7 +70,7 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
     });
 
     // Verify sendLoginCode was NOT called
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
     expect(sendLoginCode).not.toHaveBeenCalled();
   });
 
@@ -87,13 +87,13 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
     });
 
     // Verify sendLoginCode was NOT called
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
     expect(sendLoginCode).not.toHaveBeenCalled();
   });
 
   it('should successfully exchange authorization code for token', async () => {
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     // Mock successful code exchange
     vi.mocked(sendLoginCode).mockResolvedValue({
@@ -119,8 +119,8 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
   });
 
   it('should return error when code exchange fails', async () => {
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     // Mock failed code exchange
     vi.mocked(sendLoginCode).mockResolvedValue({
@@ -147,8 +147,8 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
   });
 
   it('should handle direct OAuth token (sk-ant-oat01-...)', async () => {
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     // Mock successful token save
     vi.mocked(sendLoginCode).mockResolvedValue({
@@ -175,7 +175,7 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
   });
 
   it('should handle session expiration error', async () => {
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock session expired error
     vi.mocked(sendLoginCode).mockResolvedValue({
@@ -199,7 +199,7 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
   });
 
   it('should handle state mismatch (CSRF protection)', async () => {
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock state mismatch error
     vi.mocked(sendLoginCode).mockResolvedValue({
@@ -223,7 +223,7 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
   });
 
   it('should handle network errors during token exchange', async () => {
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock network error
     vi.mocked(sendLoginCode).mockResolvedValue({
@@ -247,7 +247,7 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
   });
 
   it('should handle OAuth server errors', async () => {
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock OAuth server error
     vi.mocked(sendLoginCode).mockResolvedValue({
@@ -271,7 +271,7 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
   });
 
   it('should pass the code as-is to sendLoginCode (trimming/parsing handled by service)', async () => {
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Mock success
     vi.mocked(sendLoginCode).mockResolvedValue({
@@ -291,8 +291,8 @@ describe('POST /api/claude/login-code - OAuth code exchange', () => {
   });
 
   it('should not broadcast status when code exchange fails', async () => {
-    const { sendLoginCode } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     // Mock multiple failure scenarios
     const failureScenarios = [

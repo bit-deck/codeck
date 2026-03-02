@@ -14,7 +14,7 @@ describe('Smoke Tests', () => {
   });
 
   it('should support ES modules', async () => {
-    const module = await import('../src/services/auth.js');
+    const module = await import('../apps/runtime/src/services/auth.js');
     expect(module).toBeDefined();
   });
 

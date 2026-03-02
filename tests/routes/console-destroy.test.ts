@@ -17,14 +17,15 @@ const { mockDestroySession, mockBroadcastStatus } = vi.hoisted(() => ({
 }));
 
 // Mock dependencies before importing router
-vi.mock('../../src/services/auth-anthropic.js', () => ({
+vi.mock('../../apps/runtime/src/services/auth-anthropic.js', () => ({
   isClaudeAuthenticated: vi.fn(() => true),
 }));
 
-vi.mock('../../src/services/console.js', () => ({
+vi.mock('../../apps/runtime/src/services/console.js', () => ({
   createConsoleSession: vi.fn(),
   createShellSession: vi.fn(),
   getSessionCount: vi.fn(() => 0),
+  MAX_SESSIONS: 5,
   resizeSession: vi.fn(),
   destroySession: mockDestroySession,
   renameSession: vi.fn(),
@@ -32,12 +33,12 @@ vi.mock('../../src/services/console.js', () => ({
   hasResumableConversations: vi.fn(),
 }));
 
-vi.mock('../../src/web/websocket.js', () => ({
+vi.mock('../../apps/runtime/src/web/websocket.js', () => ({
   broadcastStatus: mockBroadcastStatus,
 }));
 
 // Import router after mocks
-import consoleRouter from '../../src/routes/console.routes.js';
+import consoleRouter from '../../apps/runtime/src/routes/console.routes.js';
 
 describe('POST /api/console/destroy', () => {
   let app: Express;

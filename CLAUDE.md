@@ -29,30 +29,34 @@ The docs explain architecture, data flows, APIs, and conventions that you won't 
 
 ```bash
 # Build base image (once):
-docker build -t codeck-base -f Dockerfile.base .
+docker build -t codeck-base -f docker/Dockerfile.base .
 
-# Dev:
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# Isolated mode (single container — runtime + webapp):
+docker compose -f docker/compose.isolated.yml up --build
 
-# Prod:
-docker compose up
-
-# Prod with LAN access (codeck.local from any device):
-docker compose -f docker-compose.yml -f docker-compose.lan.yml up
+# Managed mode (daemon on host + runtime in container):
+codeck start    # starts container + daemon in foreground
 
 # Local build check:
 npm run build
 
-# CLI (separate package in cli/):
-cd cli && npm install && npm run build && npm link
+# CLI (workspace package in apps/cli/):
 npm run build:cli   # from project root
 ```
 
 ## LAN Access
 
-Run the host-side mDNS advertiser for LAN device discovery (works on all platforms):
+Via CLI (recommended):
 
-```powershell
+```bash
+codeck lan start   # start mDNS advertiser (macOS/Windows — requires admin/UAC)
+codeck lan stop    # stop and clean up hosts file entries
+codeck lan status  # check status
+```
+
+Or run the advertiser directly (skips CLI lifecycle management):
+
+```bash
 # One-time setup:
 cd scripts && npm install
 
@@ -60,7 +64,7 @@ cd scripts && npm install
 node scripts/mdns-advertiser.cjs
 ```
 
-This makes `codeck.local` and `{port}.codeck.local` resolvable from phones, tablets, and other LAN devices. See `docs/CONFIGURATION.md` for details.
+This makes `codeck.local` and `{port}.codeck.local` resolvable from phones, tablets, and other LAN devices. On Linux, LAN access is configured via `codeck init` (host networking). See `docs/DEPLOYMENT.md` for details.
 
 ## Conventions
 
@@ -75,15 +79,16 @@ If you are running on a VPS where this repo IS the live Codeck installation (`/o
 
 ```bash
 # After editing code:
-npm run build && sudo systemctl restart codeck
+npm run build && docker build -t codeck -f docker/Dockerfile . && sudo systemctl restart codeck
 ```
 
 Or use the helper script: `bash scripts/self-deploy.sh`
 
 **Important:**
 - The service restart kills your terminal session. The frontend auto-reconnects.
+- `systemctl restart codeck` manages both the daemon and the runtime container.
 - Always `git commit` before deploying — your files stay on disk, but committed code is safer.
-- If a deploy breaks the server, SSH in: `sudo git checkout . && sudo npm run build && sudo systemctl restart codeck`
+- If a deploy breaks the server, SSH in: `sudo git checkout . && sudo npm run build && docker build -t codeck -f docker/Dockerfile . && sudo systemctl restart codeck`
 - You have sudo for: `systemctl restart/stop/start codeck`
 
 ## Rules

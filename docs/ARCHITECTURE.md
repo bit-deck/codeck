@@ -3,87 +3,205 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Process lifecycle](#process-lifecycle)
-3. [Backend](#backend)
-4. [Frontend](#frontend)
-5. [Authentication flows](#authentication-flows)
-6. [WebSocket protocol](#websocket-protocol)
-7. [PTY terminal management](#pty-terminal-management)
-8. [Port exposure](#port-exposure)
-9. [Preset system](#preset-system)
-10. [Docker infrastructure](#docker-infrastructure)
-11. [Container filesystem at runtime](#container-filesystem-at-runtime)
-12. [Security model](#security-model)
-13. [Caching and in-memory state](#caching-and-in-memory-state)
-14. [Concurrency & State Management](#concurrency--state-management)
-15. [Module dependencies](#module-dependencies)
+2. [Deployment modes](#deployment-modes)
+3. [Process lifecycle](#process-lifecycle)
+4. [Backend](#backend)
+5. [Frontend](#frontend)
+6. [Authentication flows](#authentication-flows)
+7. [WebSocket protocol](#websocket-protocol)
+8. [PTY terminal management](#pty-terminal-management)
+9. [Port exposure](#port-exposure)
+10. [Preset system](#preset-system)
+11. [Docker infrastructure](#docker-infrastructure)
+12. [Container filesystem at runtime](#container-filesystem-at-runtime)
+13. [Security model](#security-model)
+14. [Caching and in-memory state](#caching-and-in-memory-state)
+15. [Concurrency & State Management](#concurrency--state-management)
+16. [Module dependencies](#module-dependencies)
 
 ---
 
 ## Overview
 
+### Monorepo structure
+
 ```
-                         ┌─────────────────┐
-                         │   Browser        │
-                         │  (Preact SPA)    │
-                         └────────┬─────────┘
-                                  │
-                    HTTP REST + WebSocket (ws)
-                                  │
-              ┌───────────────────┴───────────────────┐
-              │         Express Server (:80)           │
-              │                                        │
-              │  ┌─ Rate Limiter (per-route)             │
-              │  ├─ Auth Middleware (Bearer token)      │
-              │  ├─ Static Files (Vite build)          │
-              │  ├─ REST Routes (/api/*)               │
-              │  └─ WebSocket Server (ws library)      │
-              └────┬──────────┬──────────┬─────────────┘
-                   │          │          │
-           ┌───────┘    ┌─────┘    ┌─────┘
-           ▼            ▼          ▼
-     ┌──────────┐ ┌──────────┐ ┌───────────┐
-     │ Services │ │ node-pty │ │ External  │
-     │          │ │ sessions │ │ processes │
-     │ auth     │ │ (max 5)  │ │           │
-     │ claude   │ │          │ │ claude    │
-     │ git      │ │ stdin/   │ │ gh        │
-     │ console  │ │ stdout   │ │ git       │
-     │ preset   │ └──────────┘ │ ssh       │
-     │ resources│              └───────────┘
-     │ usage    │
-     │ mdns     │
-     └──────────┘
+apps/
+├── web/        Preact SPA (Vite build → apps/web/dist/)
+├── runtime/    Backend: PTY, files, memory, agents, auth setup (Express + WS)
+├── daemon/     Gateway proxy: auth, rate limiting, audit, HTTP/WS proxy (Express)
+└── cli/        Host-side CLI for Docker lifecycle (codeck init/start/stop/status/logs/open/restart/doctor/lan)
 ```
 
-The system is a **monolithic Express server** that serves a Preact SPA and exposes a REST API + WebSocket. It does not use a database — all state lives in memory (Map/variables) and in JSON files on disk.
+All four apps build independently (`npm run build`). The runtime and daemon share no code — communication is HTTP/WS over the network.
+
+### Isolated mode (single container)
+
+```
+┌─────────────────┐
+│   Browser        │
+│  (Preact SPA)    │
+└────────┬─────────┘
+         │
+   HTTP + WebSocket
+         │
+┌────────┴──────────────────────────┐
+│     Runtime (:80)                  │
+│                                    │
+│  ├─ Static Files (apps/web/dist)  │
+│  ├─ Auth Middleware               │
+│  ├─ REST Routes (/api/*)          │
+│  ├─ WebSocket Server              │
+│  ├─ Services (PTY, files, memory) │
+│  └─ /internal/status (health)     │
+└───────────────────────────────────┘
+```
+
+The runtime serves the SPA, handles auth, and runs all backend logic. No daemon, no Docker socket. This is the default mode — simple and secure. Works on Linux, macOS, and Windows.
+
+### Managed mode (daemon on host + runtime in container)
+
+```
+┌─────────────────┐
+│   Browser        │
+│  (Preact SPA)    │
+└────────┬─────────┘
+         │
+   HTTP + WebSocket
+         │
+┌────────┴──────────────────────────┐
+│     Daemon (:8080, host process)  │
+│                                    │
+│  ├─ Static Files (apps/web/dist)  │
+│  ├─ Auth (login/logout/sessions)  │
+│  ├─ Rate Limiting (auth + writes) │
+│  ├─ Audit Log (JSONL)             │
+│  ├─ Port Manager (compose ops)    │
+│  ├─ HTTP Proxy (/api/* → runtime) │
+│  └─ WS Proxy (upgrade → runtime)  │
+└────────┬──────────────────────────┘
+         │
+    localhost (127.0.0.1:7777/7778)
+         │
+┌────────┴──────────────────────────┐
+│     Runtime (:7777/:7778, private)│
+│                                    │
+│  ├─ REST Routes (/api/*)          │
+│  ├─ WebSocket Server (:7778)      │
+│  ├─ Services (PTY, files, memory) │
+│  └─ /internal/status (health)     │
+└───────────────────────────────────┘
+```
+
+The daemon runs as a native Node.js process on the host. It handles password auth, rate limiting, audit logging, and port exposure (via Docker Compose operations). The runtime is in an isolated Docker container — no Docker socket, never exposed to the network. Port requests from the runtime are delegated to the daemon via `CODECK_DAEMON_URL`. Works on Linux, macOS, and Windows.
+
+The system does not use a database — all state lives in memory (Map/variables) and in JSON files on disk.
+
+---
+
+## Deployment modes
+
+| | Isolated | Managed |
+|---|---|---|
+| **Processes** | 1 (runtime in container) | 2 (daemon on host + runtime in container) |
+| **Exposed port** | Runtime `:80` | Daemon `:8080` |
+| **Auth** | Runtime handles all | Daemon handles password auth; runtime trusts private network |
+| **SPA served by** | Runtime | Daemon |
+| **Browser talks to** | Runtime directly | Daemon only |
+| **Runtime exposed?** | Yes (container port) | No (127.0.0.1 only) |
+| **Docker compose** | `docker/compose.isolated.yml` | `docker/compose.managed.yml` |
+| **Rate limiting** | Runtime (200/min general) | Daemon (10/min auth, 60/min writes) |
+| **Audit log** | None | Daemon (`audit.log` JSONL) |
+| **Port exposure** | Manual override or Docker socket (opt-in) | Daemon handles via compose operations |
+| **Docker socket** | Not mounted (isolated) | Not mounted (isolated) |
+| **Cross-platform** | Linux, macOS, Windows | Linux, macOS, Windows |
+| **Use case** | Local sandbox, simple setup | VPS, multi-device access, dynamic ports |
+
+### Managed mode proxy flow
+
+```
+Browser                    Daemon (host)              Runtime (container)
+  │                          │                          │
+  │ POST /api/auth/login ──→ │ (daemon-owned)           │
+  │ ← {token} ──────────────│                           │
+  │                          │                          │
+  │ GET /api/console ──────→ │ validate token           │
+  │                          │ strip Authorization      │
+  │                          │ add X-Codeck-Internal ──→ │ bypass auth (trusted proxy)
+  │                          │ ← response ──────────────│
+  │ ← response ─────────────│                           │
+  │                          │                          │
+  │ WS upgrade ────────────→ │ validate token           │
+  │                          │ add X-Codeck-Internal ──→ │ bypass auth (trusted proxy)
+  │                          │ upgrade + pipe ─────────→ │ accept WS
+  │ ← bidirectional ────────│←─────────────────────────│
+```
+
+**Daemon-owned routes** (not proxied):
+- `GET /api/ui/status` — daemon health + WS connection count
+- `GET /api/auth/status` — password configured?
+- `POST /api/auth/login` — create daemon session
+- `POST /api/auth/logout` — destroy daemon session
+- `GET /api/auth/sessions` — list active sessions
+- `DELETE /api/auth/sessions/:id` — revoke session
+- `GET /api/auth/log` — auth event history
+- `GET /api/ports` — list mapped ports (daemon port manager)
+- `POST /api/system/add-port` — expose a port (daemon port manager)
+- `POST /api/system/remove-port` — remove a port mapping (daemon port manager)
+
+**All other `/api/*`** requests are proxied to the runtime. The daemon strips its own `Authorization` header and adds `X-Codeck-Internal: <secret>` before proxying.
+
+### Internal secret (`CODECK_INTERNAL_SECRET`)
+
+In managed mode, the CLI (or `start-managed.sh`) generates a random 32-byte secret at startup and passes it to both the daemon and the runtime container via environment variable. This secret powers two mechanisms:
+
+1. **Daemon → runtime auth bypass.** The daemon adds `X-Codeck-Internal: <secret>` to every proxied HTTP request and WebSocket upgrade. The runtime auth middleware recognises this header and skips token validation — the daemon has already authenticated the user.
+
+2. **Direct browser redirect.** If the runtime receives a non-API request *without* `X-Codeck-Internal` (i.e., someone hit the runtime port directly, not via the daemon), it redirects the browser to the daemon port. This prevents accidentally serving the webapp from an unauthenticated port.
+
+The secret is never written to disk — it is generated fresh on every boot and shared only in-process via environment variables. If the daemon restarts without restarting the runtime, the secret mismatch causes the redirect to trigger; restart both together.
+
+### Port exposure flow (managed mode)
+
+```
+Runtime                     Daemon (host)
+  │                           │
+  │ POST /api/system/add-port │
+  │  (CODECK_DAEMON_URL) ───→ │
+  │                           │ Write compose.override.yml
+  │                           │ docker compose up -d runtime
+  │  ← {success, restarting} │
+```
+
+In managed mode, the runtime delegates port requests to the daemon via `CODECK_DAEMON_URL`. The daemon writes `docker/compose.override.yml` and restarts the runtime container with the new port mapping. No Docker socket is needed inside the container.
 
 ---
 
 ## Process lifecycle
 
-### Startup
+### Runtime startup
 
 ```
-Docker ENTRYPOINT
+Docker ENTRYPOINT (or systemd ExecStart)
     │
     ▼
-init-keyring.sh
+init-keyring.sh (Docker only)
     ├── dbus-daemon --system --fork
     ├── dbus-launch (session bus)
     ├── gnome-keyring-daemon --unlock (empty password)
-    └── exec node dist/index.js --web
+    └── exec node apps/runtime/dist/index.js --web
             │
             ▼
-        src/index.ts::main()
+        apps/runtime/src/index.ts::main()
             ├── If --clone URL: cloneRepository(url)
             └── startWebServer()
                     │
                     ▼
-                src/web/server.ts::startWebServer()
+                apps/runtime/src/web/server.ts::startWebServer()
                     ├── installLogInterceptor()    → Intercepts console.log/error/warn/info
                     ├── express()                   → App + static + routes
                     ├── setupWebSocket(server)      → WS server (noServer mode)
+                    ├── [if CODECK_WS_PORT] createWsServer() → Separate WS server on dedicated port
                     └── server.listen(PORT)
                         └── [post-listen callbacks]
                             ├── initPortManager()           → Read env vars, detect network mode
@@ -99,7 +217,7 @@ init-keyring.sh
                             └── restoreSavedSessions()      → Auto-resume sessions from previous lifecycle (delayed 2s)
 ```
 
-### Shutdown
+### Runtime shutdown
 
 ```
 SIGTERM / SIGINT
@@ -115,6 +233,40 @@ gracefulShutdown()
     ├── stopPortScanner()        → Clears port scanning interval timer
     ├── destroyAllSessions()     → Kills all PTYs
     ├── server.close()           → Closes HTTP/WS connections
+    ├── [if wsServer] wsServer.close() → Closes dedicated WS server
+    └── setTimeout(5000)         → Force exit if it doesn't close
+```
+
+### Daemon startup (gateway mode only)
+
+```
+node apps/daemon/dist/index.js
+    │
+    ▼
+apps/daemon/src/server.ts::startDaemon()
+    ├── express()                      → App + helmet + JSON parser
+    ├── Register daemon-owned routes   → /api/ui/status, /api/auth/*
+    ├── Auth middleware                 → Bearer token validation (if password configured)
+    ├── Writes rate limiter            → POST/PUT/DELETE on /api/* (excl. auth/)
+    ├── Proxy catch-all                → /api/* → runtime via HTTP proxy
+    ├── express.static(WEB_DIST)       → Serve SPA from apps/web/dist/
+    ├── SPA catch-all                  → index.html for client-side routing
+    ├── server.on('upgrade')           → WS proxy handler
+    └── server.listen(DAEMON_PORT)
+```
+
+### Daemon shutdown
+
+```
+SIGTERM / SIGINT
+    │
+    ▼
+gracefulShutdown()
+    ├── shutdownWsProxy()        → Close all WS connections, stop ping interval
+    ├── authLimiter.destroy()    → Clear rate limit timer
+    ├── writesLimiter.destroy()  → Clear rate limit timer
+    ├── flushAudit()             → Flush buffered audit entries to disk
+    ├── server.close()           → Close HTTP connections
     └── setTimeout(5000)         → Force exit if it doesn't close
 ```
 
@@ -124,24 +276,47 @@ The container uses `tini` as PID 1 (`init: true` in docker-compose) to reap zomb
 
 ## Backend
 
-### Middleware pipeline
+The backend is split between two Express applications: the **runtime** (all business logic) and the **daemon** (auth gateway + proxy). In isolated mode, only the runtime runs. In managed mode, both run.
 
-Requests to `/api/*` pass through this pipeline in order:
+### Runtime middleware pipeline
+
+Requests pass through this pipeline in order:
 
 ```
-Request → Static Files → JSON Parser → Rate Limiter → Auth Endpoints (public) → Auth Middleware → Routes
+Request → /internal/status (pre-auth) → Managed redirect → Static Files → JSON Parser
+        → Rate Limiter → Auth Endpoints (public) → Auth Middleware → Routes
 ```
 
-1. **Static files** — `express.static(dist/web/public)` serves the compiled frontend
-2. **JSON parser** — `express.json()` for body parsing
-3. **Rate limiter** — In-memory Map, per-route: 10 req/min for `/api/auth`, 200 req/min for `/api/*`, with 5-minute stale IP cleanup
-4. **Auth endpoints** — `/api/auth/status`, `/setup`, `/login` are public; `/logout` and `/change-password` are protected
-5. **Auth middleware** — Validates `Authorization: Bearer <token>` or `?token=` query param against `activeSessions` Map
-6. **Routes** — 14 routers mounted at `/api/<domain>`, plus inline auth/status/logs/ports/account endpoints
+1. **Internal endpoint** — `/internal/status` returns `{status: "ok", uptime}`. Registered before all other middleware; used by daemon for health checks.
+2. **Managed redirect** — If `CODECK_INTERNAL_SECRET` is set (managed mode only): non-API requests without `X-Codeck-Internal` header are redirected to the daemon port. Prevents serving the webapp from the unauthenticated runtime port.
+3. **Static files** — `express.static(apps/web/dist)` serves the compiled frontend (isolated mode only; daemon serves SPA in managed mode)
+4. **JSON parser** — `express.json()` for body parsing
+5. **Rate limiter** — In-memory Map, per-route: 10 req/min for `/api/auth`, 200 req/min for `/api/*`, with 5-minute stale IP cleanup
+6. **Auth endpoints** — `/api/auth/status`, `/setup`, `/login` are public; `/logout` and `/change-password` are protected
+7. **Auth middleware** — Validates `Authorization: Bearer <token>` or `?token=` query param against `activeSessions` Map. Two bypass paths:
+   - `X-Codeck-Internal: <secret>` header (managed mode) — daemon-proxied requests skip user token validation
+   - Localhost (127.0.0.1) — bypasses auth for `/api/memory/*` (agent access from inside the container)
+8. **Routes** — 14 routers mounted at `/api/<domain>`, plus inline auth/status/logs/ports/account endpoints
+9. **Internal endpoints** — `/internal/status` returns `{status: "ok", uptime}` (registered before auth middleware, used by daemon for health checks)
 
-### Service layer
+### Daemon middleware pipeline (gateway mode)
 
-Each service is an ES module with pure functions (no classes). Mutable state is encapsulated in module variables.
+```
+Request → JSON Parser → Daemon Routes (public) → Auth Middleware → Writes Limiter → Proxy → Static Files → SPA
+```
+
+1. **JSON parser** — `express.json()` for body parsing
+2. **Daemon routes** — `GET /api/ui/status`, `GET /api/auth/status`, `POST /api/auth/login` (public, rate limited)
+3. **Auth middleware** — Validates daemon session token (`Authorization: Bearer` or `?token=`). Skipped if no password configured
+4. **Writes rate limiter** — 60 req/min for POST/PUT/DELETE on `/api/*` (excl. auth/, GET/HEAD/OPTIONS)
+5. **Protected daemon routes** — logout, sessions, session revoke, auth log
+6. **Proxy catch-all** — All remaining `/api/*` forwarded to runtime via HTTP proxy
+7. **Static files** — `express.static(apps/web/dist)` with cache headers (1yr immutable for hashed assets, no-cache for HTML)
+8. **SPA catch-all** — `index.html` for client-side routing
+
+### Runtime service layer
+
+Each service is an ES module with pure functions (no classes). Mutable state is encapsulated in module variables. All services run in the runtime process (`apps/runtime/`).
 
 | Service | File | In-memory state | Disk persistence |
 |---------|------|-----------------|------------------|
@@ -157,12 +332,25 @@ Each service is an ES module with pure functions (no classes). Mutable state is 
 | `memory-indexer` | `services/memory-indexer.ts` | `db` (better-sqlite3 instance), file watcher | `/workspace/.codeck/index/index.db` |
 | `memory-search` | `services/memory-search.ts` | `db` (better-sqlite3 readonly) | `/workspace/.codeck/index/index.db` |
 | `session-writer` | `services/session-writer.ts` | `sessionStreams: Map`, input/output buffers | `/workspace/.codeck/sessions/*.jsonl` |
-| `port-manager` | `services/port-manager.ts` | `networkMode`, `mappedPorts: Set`, `containerId`, compose labels | Writes `docker-compose.override.yml` via Docker helper |
+| `port-manager` | `services/port-manager.ts` | `networkMode`, `mappedPorts: Set`, `containerId`, compose labels | Writes `compose.override.yml` via Docker helper |
 | `logger` | `web/logger.ts` | `logBuffer: LogEntry[]` (circular, max 100), `wsClients[]` | None |
 
-### Routers
+### Daemon service layer (managed mode)
 
-Each router is an `express.Router()` mounted at a path prefix in `server.ts`:
+Daemon services run in a separate process (`apps/daemon/`). They handle auth gating and proxying — no business logic.
+
+| Service | File | In-memory state | Disk persistence |
+|---------|------|-----------------|------------------|
+| `auth` | `services/auth.ts` | `activeSessions: Map<token, SessionData>` | `CODECK_DIR/daemon-sessions.json` (mode 0600). Reads `CODECK_DIR/auth.json` (shared with runtime, read-only) |
+| `audit` | `services/audit.ts` | `buffer: string[]` (flush every 5s or 20 entries) | `CODECK_DIR/audit.log` (JSONL, mode 0600) |
+| `rate-limit` | `services/rate-limit.ts` | `RateLimiter` instances (per-IP sliding window) | None |
+| `proxy` | `services/proxy.ts` | None | None |
+| `ws-proxy` | `services/ws-proxy.ts` | `connections: Set<WsConnection>`, ping interval | None |
+| `port-manager` | `services/port-manager.ts` | `mappedPorts: Set<number>` | Writes `docker/compose.override.yml`, restarts runtime container via `docker compose up -d` |
+
+### Runtime routers
+
+Each router is an `express.Router()` mounted at a path prefix in `apps/runtime/src/web/server.ts`:
 
 | Router | Mount path | Delegates to |
 |--------|-----------|-------------|
@@ -180,6 +368,9 @@ Each router is an `express.Router()` mounted at a path prefix in `server.ts`:
 | `system.routes.ts` | `/api/system` | `services/port-manager.ts` — Network info, port exposure |
 | `workspace.routes.ts` | `/api/workspace` | Direct spawn — Export workspace as tar.gz (includes `.codeck/` agent data) |
 | `permissions.routes.ts` | `/api/permissions` | `services/permissions.ts` — CLI permission toggles |
+| `agents.routes.ts` | `/api/agents` | `services/proactive-agents.ts` — Proactive agent CRUD + scheduler |
+
+In gateway mode, all these routes are accessed through the daemon's HTTP proxy. The proxy is transparent — endpoint paths and payloads are identical.
 
 Pattern: routes call `broadcastStatus()` after operations that change state, to notify all WS clients.
 
@@ -224,7 +415,7 @@ console.log("message")
 - **Preact 10.19** — Lightweight Virtual DOM (3KB), React-compatible API
 - **@preact/signals** — Reactive state without unnecessary re-renders
 - **xterm.js 5.5** — Terminal emulator in the browser
-- **Vite 5.4** — Bundler, dev server with HMR, output to `dist/web/public/`
+- **Vite 5.4** — Bundler, dev server with HMR, output to `apps/web/dist/`
 
 ### Component tree
 
@@ -369,6 +560,8 @@ export async function apiFetch(url: string, options?: RequestInit): Promise<Resp
 
 Access authentication for the webapp. Single-user, stored in the container.
 
+**In isolated mode**, the runtime handles all auth directly. **In managed mode**, the daemon has its own session store (`daemon-sessions.json`) and validates passwords against the shared `auth.json`. The runtime trusts proxied requests via `X-Codeck-Internal` — the daemon strips its own `Authorization` header and adds this secret header before proxying, so the runtime never sees user session tokens.
+
 ```
 ┌────────┐                         ┌────────┐                    ┌─────────────────────────┐
 │ Browser│                         │ Server │                    │ /workspace/.codeck/   │
@@ -445,7 +638,7 @@ See AUDIT-66 for detailed security analysis and threat model discussion.
 
 ### API Authentication Middleware Flow
 
-All `/api/*` endpoints are protected by a centralized auth middleware (server.ts:168-174), with **explicit exceptions** for public endpoints:
+**Runtime auth** — All `/api/*` endpoints are protected by a centralized auth middleware in the runtime, with **explicit exceptions** for public endpoints. In gateway mode, requests arrive pre-validated by the daemon (but runtime still enforces its own auth for defense in depth):
 
 ```
 Request to /api/*
@@ -917,14 +1110,14 @@ Browser: GET http://localhost:3000/
         └── Container service on 0.0.0.0:3000
 ```
 
-**Default mapping:** Only the Codeck port (default 80) is mapped. Additional ports are added on demand via the dashboard UI, the `POST /api/system/add-port` API, or manually in `docker-compose.override.yml` (see `docker-compose.override.yml.example`). The Codeck CLI `init` wizard can also pre-map ports during setup.
+**Default mapping:** Only the Codeck port (default 80) is mapped. Additional ports are added on demand via the dashboard UI, the `POST /api/system/add-port` API, or manually in `docker/compose.override.yml`. The Codeck CLI `init` wizard can also pre-map ports during setup.
 
 ### Port manager (port-manager.ts)
 
 Reads `CODECK_MAPPED_PORTS` environment variable on startup. Detects compose project info (project dir, service name, container image) via Docker container labels. Provides `isPortExposed(port)` to check if a port is in the mapped range.
 
 When a new port needs to be exposed in bridge mode, the port manager:
-1. Writes `docker-compose.override.yml` on the host via a helper container (base64 pipe)
+1. Writes `compose.override.yml` on the host via a helper container (base64 pipe)
 2. Saves session state for auto-restore
 3. Spawns a detached helper container that runs `docker compose up -d` after a 3s delay
 4. The sandbox container gets recreated with the new port mapping
@@ -999,14 +1192,14 @@ Codeck implements a **single-container architecture** where all projects share o
 **Bridge Mode (all platforms)** — Standard Docker network isolation:
 - Container runs on Docker bridge network
 - Network namespace isolation: **ENABLED** (container isolated from host network)
-- Port exposure: Explicit mapping via `docker-compose.yml` (e.g., `80:80`)
+- Port exposure: Explicit mapping via compose file (e.g., `80:80`)
 - Inbound access: Only mapped ports reachable from host
 - Outbound access: Unrestricted (no egress filtering)
-- LAN access: Use `docker-compose.lan.yml` overlay + host-side mDNS advertiser script
+- LAN access: Run `codeck lan start` (macOS/Windows) or configure host networking at `codeck init` (Linux)
 
 ### Host Access via `extra_hosts`
 
-**Configuration** (`docker-compose.yml` line 59-60):
+**Configuration** (compose files):
 ```yaml
 extra_hosts:
   - "host.docker.internal:host-gateway"
@@ -1225,7 +1418,7 @@ The preset system, git service, and workspace export work together to maintain t
 ### Multi-image build strategy
 
 ```
-Dockerfile.base (build once)
+docker/Dockerfile.base (build once)
     │
     │  FROM node:22-slim
     │  + build-essential, git, openssh, dbus, gnome-keyring
@@ -1234,20 +1427,18 @@ Dockerfile.base (build once)
     │  + init-keyring.sh
     │
     ▼
-Dockerfile (production)              Dockerfile.dev (development)
-    │                                    │
-    │  FROM codeck-base:latest         │  FROM codeck-base:latest AS builder
-    │  COPY package.json                 │  COPY . .
-    │  npm install --ignore-scripts      │  npm install
-    │  cp /prebuilt/node-pty →           │  npm run build
-    │    node_modules/                   │
-    │  COPY dist/ (pre-built)            │  FROM codeck-base:latest
-    │  COPY templates/                   │  COPY --from=builder dist/
-    │                                    │  COPY --from=builder node_modules/
-    │                                    │
-    │  ENTRYPOINT [init-keyring.sh,      │  ENTRYPOINT [init-keyring.sh,
-    │    node, dist/index.js]            │    node, dist/index.js]
-    │  CMD [--web]                       │  CMD [--web]
+docker/Dockerfile (production)
+    │
+    │  FROM codeck-base:latest
+    │  COPY package.json
+    │  npm install --ignore-scripts
+    │  cp /prebuilt/node-pty → node_modules/
+    │  COPY dist/ (pre-built on host)
+    │  COPY templates/
+    │
+    │  ENTRYPOINT [init-keyring.sh,
+    │    node, dist/index.js]
+    │  CMD [--web]
 ```
 
 **Why a separate base image:**
@@ -1269,15 +1460,18 @@ exec "$@"                             # Then executes the server
 
 Codeck also saves the OAuth token directly in `.credentials.json` as a fallback (more reliable in a container).
 
-### Docker Compose
+### Docker Compose — Isolated mode
 
 ```yaml
+# docker/compose.isolated.yml
 services:
   sandbox:
-    build: .
-    init: true                              # tini as PID 1
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    init: true
     ports:
-      - "${CODECK_PORT:-80}:${CODECK_PORT:-80}"  # Only Codeck port by default
+      - "${CODECK_PORT:-80}:${CODECK_PORT:-80}"
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE, KILL, DAC_OVERRIDE]
@@ -1287,11 +1481,34 @@ services:
       - codeck-data:/workspace/.codeck
       - claude-config:/root/.claude
       - ssh-data:/root/.ssh
+    entrypoint: ["/usr/local/bin/init-keyring.sh", "node", "apps/runtime/dist/index.js"]
+    command: ["--web"]
 ```
 
-Additional dev server ports are exposed on demand via `docker-compose.override.yml` — `http://localhost:{port}` from the host, `http://{HOST_IP}:{port}` from LAN devices.
+Additional dev server ports are exposed on demand via `compose.override.yml`. `init: true` adds tini as PID 1 to reap zombie processes.
 
-`init: true` adds tini as PID 1 to reap zombie processes from dev servers that terminate.
+### Docker Compose — Managed mode
+
+```yaml
+# docker/compose.managed.yml (simplified)
+services:
+  runtime:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: codeck-runtime
+    ports:
+      - "127.0.0.1:7777:7777"
+      - "127.0.0.1:7778:7778"
+    environment:
+      - CODECK_PORT=7777
+      - CODECK_WS_PORT=7778
+      - CODECK_DAEMON_URL=http://host.docker.internal:${CODECK_DAEMON_PORT:-8080}
+    entrypoint: ["/usr/local/bin/init-keyring.sh", "node", "apps/runtime/dist/index.js"]
+    command: ["--web"]
+```
+
+The daemon runs on the host as a native Node.js process (not in a container). See `docker/compose.managed.yml` for full config with security hardening, resource limits, and volume mounts.
 
 ---
 
@@ -1299,26 +1516,21 @@ Additional dev server ports are exposed on demand via `docker-compose.override.y
 
 ```
 /
-├── app/                              # Application
-│   ├── dist/
-│   │   ├── index.js                  # Compiled entry point
-│   │   ├── services/                 # Compiled backend
-│   │   ├── routes/                   # Compiled routes
-│   │   ├── web/
-│   │   │   ├── server.js
-│   │   │   ├── websocket.js
-│   │   │   ├── logger.js
-│   │   │   └── public/               # Frontend (Vite build)
-│   │   │       ├── index.html
-│   │   │       └── assets/           # JS/CSS bundles
-│   │   └── templates/
-│   │       ├── CLAUDE.md             # Workspace CLAUDE.md template (Layer 2)
-│   │       ├── preferences.md        # Preferences template
-│   │       └── presets/              # Preset templates
-│   │           ├── default/
-│   │           │   ├── CLAUDE.md     # Layer 1 template (memory rules inline)
-│   │           │   └── AGENTS.md     # Advanced memory reference
-│   │           └── empty/
+├── app/                              # Application (monorepo)
+│   ├── apps/
+│   │   ├── web/dist/                 # Frontend (Vite build)
+│   │   │   ├── index.html
+│   │   │   └── assets/               # JS/CSS bundles (hashed filenames)
+│   │   ├── runtime/dist/             # Runtime backend
+│   │   │   ├── index.js              # Entry point
+│   │   │   ├── services/             # Compiled services
+│   │   │   ├── routes/               # Compiled routes
+│   │   │   ├── web/                  # server.js, websocket.js, logger.js
+│   │   │   └── templates/            # CLAUDE.md templates, presets
+│   │   ├── daemon/dist/              # Daemon gateway
+│   │   │   ├── index.js              # Entry point
+│   │   │   └── services/             # auth, audit, port-manager, proxy, rate-limit, ws-proxy
+│   │   └── cli/dist/                 # CLI tool (host-side only, not in container)
 │   ├── node_modules/
 │   └── package.json
 │
@@ -1385,13 +1597,20 @@ Additional dev server ports are exposed on demand via `docker-compose.override.y
               │                 │  tmpfs: /tmp, /run, /run/dbus, /var/run
               └────────┬────────┘
                        │
+        ┌──────────────┴──────────────┐ (gateway mode only)
+        │  Daemon Auth Gate           │  Separate session store
+        │  + Audit Log                │  All auth events logged (JSONL)
+        │  + Rate Limiting            │  10/min auth, 60/min writes
+        │  + Brute-force Lockout      │  5 attempts → 15min lockout
+        └──────────────┬──────────────┘
+                       │
               ┌────────┴────────┐
               │  Security Headers│  CSP, X-Frame-Options, X-Content-Type-Options
               │  (Helmet.js)     │  HSTS disabled (plain HTTP environment)
               └────────┬────────┘
                        │
               ┌────────┴────────┐
-              │  Rate Limiter   │  10/min auth, 200/min general
+              │  Rate Limiter   │  10/min auth, 200/min general (runtime)
               │  (in memory)    │  5-min stale IP cleanup
               └────────┬────────┘
                        │
@@ -1454,7 +1673,7 @@ Proactive agents spawn via `child_process.spawn()` with a hardcoded binary path 
 
 **Docker Socket Access — CRITICAL SECURITY NOTE**
 
-By default, the Docker socket is **NOT** mounted (secure mode). When running in experimental mode (`docker-compose.experimental.yml`), agents have full Docker host access via the socket mount (`/var/run/docker.sock`). This means:
+The Docker socket is **not mounted** by default in either compose file. In isolated mode, it can be optionally enabled by uncommenting the volume line in `compose.isolated.yml`. In managed mode, port exposure is handled by the host daemon — no socket needed. If the Docker socket IS mounted:
 
 - Agents can spawn privileged containers to gain root on host
 - Agents can read logs and attach to other containers
@@ -1546,12 +1765,12 @@ See AUDIT-97 for comprehensive CSRF threat model analysis and implementation rec
 
 Codeck mitigates supply chain risks through:
 
-- **Base image digest pinning** — `node:22-slim` pinned to immutable SHA256 digest in `Dockerfile.base` prevents tag-swap attacks and ensures reproducible builds
+- **Base image digest pinning** — `node:22-slim` pinned to immutable SHA256 digest in `docker/Dockerfile.base` prevents tag-swap attacks and ensures reproducible builds
 - **npm lockfile** — `package-lock.json` (lockfile version 3) ensures reproducible dependency installs across all environments
 - **Explicit version pinning** — Claude CLI (`@anthropic-ai/claude-code@2.1.39`) and security-critical packages pinned to exact versions rather than semver ranges
 
 **Current Supply Chain Controls:**
-- ✅ Docker base image digest pinning (prevents tag-swap, documented update process in Dockerfile.base comments)
+- ✅ Docker base image digest pinning (prevents tag-swap, documented update process in docker/Dockerfile.base comments)
 - ✅ Claude CLI version pinning (prevents supply chain drift, manual update policy)
 - ✅ npm package lockfile (reproducible installs, version consistency)
 - ✅ Minimal base image (`node:22-slim` reduces attack surface vs full Node image)
@@ -1567,7 +1786,7 @@ Codeck mitigates supply chain risks through:
 
 Digest pinning provides reproducible builds at the cost of delayed security patches. To balance security and stability:
 
-- **Update cadence:** Monthly verification against Docker Hub (see Dockerfile.base line 6 comments)
+- **Update cadence:** Monthly verification against Docker Hub (see docker/Dockerfile.base line 6 comments)
 - **Last verified:** 2026-02-14 (digest sha256:5373f1906319...)
 - **Security-critical CVEs:** May warrant immediate update (monitor Debian Security Advisories)
 - **Update procedure:** Documented in AUDIT-110 (Docker Base Image CVE Scan) and CONFIGURATION.md
@@ -1832,8 +2051,10 @@ export async function updateConfig(changes: Partial<Config>) {
 
 ## Module dependencies
 
+### Runtime
+
 ```
-index.ts
+apps/runtime/src/index.ts
     └── web/server.ts
             ├── services/mdns.ts
             ├── web/logger.ts
@@ -1891,3 +2112,17 @@ index.ts
 ```
 
 **Circular dependency avoided:** `websocket.ts` exports `broadcastStatus()` which routes import. Services never import from routes or web — they only export pure functions.
+
+### Daemon
+
+```
+apps/daemon/src/index.ts
+    └── server.ts
+            ├── services/auth.ts          → Password validation, session management
+            ├── services/audit.ts         → Append-only JSONL audit log
+            ├── services/rate-limit.ts    → Per-IP sliding window + brute-force lockout
+            ├── services/proxy.ts         → HTTP reverse proxy to runtime
+            └── services/ws-proxy.ts      → WebSocket upgrade + bidirectional pipe to runtime
+```
+
+The daemon has zero imports from the runtime — communication is HTTP/WS over the network.

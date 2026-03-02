@@ -11,10 +11,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import agentRoutes from '../../src/routes/agent.routes.js';
+import agentRoutes from '../../apps/runtime/src/routes/agent.routes.js';
 
 // Mock the dependencies
-vi.mock('../../src/services/auth-anthropic.js', () => ({
+vi.mock('../../apps/runtime/src/services/auth-anthropic.js', () => ({
   getClaudeStatus: vi.fn(() => ({
     installed: true,
     authenticated: false,
@@ -35,7 +35,7 @@ vi.mock('../../src/services/auth-anthropic.js', () => ({
   sendLoginCode: vi.fn(),
 }));
 
-vi.mock('../../src/web/websocket.js', () => ({
+vi.mock('../../apps/runtime/src/web/websocket.js', () => ({
   broadcastStatus: vi.fn(),
 }));
 
@@ -57,8 +57,8 @@ describe('POST /api/claude/login-cancel - OAuth flow cancellation', () => {
   });
 
   it('should cancel active OAuth login and broadcast status', async () => {
-    const { cancelLogin } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { cancelLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     const response = await request(app)
       .post('/api/claude/login-cancel')
@@ -77,8 +77,8 @@ describe('POST /api/claude/login-cancel - OAuth flow cancellation', () => {
   });
 
   it('should be idempotent (safe to call when no login is active)', async () => {
-    const { cancelLogin } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { cancelLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     // First call
     const response1 = await request(app)
@@ -100,7 +100,7 @@ describe('POST /api/claude/login-cancel - OAuth flow cancellation', () => {
   });
 
   it('should always return 200 with success:true regardless of login state', async () => {
-    const { getLoginState } = await import('../../src/services/auth-anthropic.js');
+    const { getLoginState } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Test with login active
     vi.mocked(getLoginState).mockReturnValue({
@@ -134,7 +134,7 @@ describe('POST /api/claude/login-cancel - OAuth flow cancellation', () => {
   });
 
   it('should not require any request body parameters', async () => {
-    const { cancelLogin } = await import('../../src/services/auth-anthropic.js');
+    const { cancelLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
     // Empty body
     const response = await request(app)
@@ -147,8 +147,8 @@ describe('POST /api/claude/login-cancel - OAuth flow cancellation', () => {
   });
 
   it('should call cancelLogin before broadcastStatus (correct order)', async () => {
-    const { cancelLogin } = await import('../../src/services/auth-anthropic.js');
-    const { broadcastStatus } = await import('../../src/web/websocket.js');
+    const { cancelLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
+    const { broadcastStatus } = await import('../../apps/runtime/src/web/websocket.js');
 
     const callOrder: string[] = [];
 

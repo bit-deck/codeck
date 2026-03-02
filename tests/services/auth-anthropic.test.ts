@@ -23,7 +23,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
     }
 
     // Reset login state and in-memory token from previous tests
-    const { cancelLogin, _resetInMemoryTokenForTesting, invalidateAuthCache } = await import('../../src/services/auth-anthropic.js');
+    const { cancelLogin, _resetInMemoryTokenForTesting, invalidateAuthCache } = await import('../../apps/runtime/src/services/auth-anthropic.js');
     _resetInMemoryTokenForTesting();
     invalidateAuthCache();
     cancelLogin();
@@ -39,7 +39,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
   describe('startClaudeLogin - PKCE Generation', () => {
     it('should generate PKCE code verifier (base64url, 32 bytes)', async () => {
       // Import service
-      const { startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Start login to trigger PKCE generation
       const result = await startClaudeLogin();
@@ -83,7 +83,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
     it('should generate code challenge (SHA-256 of verifier)', async () => {
       // Import crypto for manual verification
       const { createHash } = await import('crypto');
-      const { startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Start login to trigger PKCE generation
       const result = await startClaudeLogin();
@@ -132,7 +132,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should generate random state for CSRF protection', async () => {
       // Import service
-      const { startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Start login to trigger state generation
       const result = await startClaudeLogin();
@@ -171,7 +171,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
       expect(result.url).toContain(`state=${pkceState.state}`);
 
       // Test randomness by generating a second state
-      const { cancelLogin } = await import('../../src/services/auth-anthropic.js');
+      const { cancelLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
       cancelLogin();
       if (existsSync(PKCE_STATE_PATH)) {
         rmSync(PKCE_STATE_PATH, { force: true });
@@ -188,7 +188,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should persist PKCE state to .pkce-state.json', async () => {
       // Import service and fs
-      const { startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
       const { statSync } = await import('fs');
 
       // Start login to trigger PKCE state persistence
@@ -255,7 +255,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should return OAuth URL with correct parameters', async () => {
       // Import service
-      const { startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Start login to get OAuth URL
       const result = await startClaudeLogin();
@@ -329,7 +329,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should reject if login already in progress', async () => {
       // Import service
-      const { startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Act 1 - Start first login
       const result1 = await startClaudeLogin();
@@ -385,7 +385,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should cleanup stale login (>5min old)', async () => {
       // Import service
-      const { startClaudeLogin } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Setup fake timers to control time
       vi.useFakeTimers();
@@ -445,7 +445,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
   describe('sendLoginCode - Code Exchange', () => {
     it('should accept raw authorization code', async () => {
       // Import service
-      const { startClaudeLogin, sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin, sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Start OAuth login first to initialize PKCE state
       const loginResult = await startClaudeLogin();
@@ -534,7 +534,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should accept direct token (sk-ant-oat01-*)', async () => {
       // Import service
-      const { sendLoginCode, isClaudeAuthenticated } = await import('../../src/services/auth-anthropic.js');
+      const { sendLoginCode, isClaudeAuthenticated } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Direct token (bypasses OAuth flow)
       const directToken = 'sk-ant-oat01-direct-token-abcdef1234567890ABCDEF1234567890-xyz';
@@ -595,7 +595,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should accept code with state (code#state)', async () => {
       // Import service
-      const { startClaudeLogin, sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin, sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Start OAuth login first to initialize PKCE state
       const loginResult = await startClaudeLogin();
@@ -684,7 +684,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should accept full URL with code parameter', async () => {
       // Import service
-      const { startClaudeLogin, sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin, sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Start OAuth login first to initialize PKCE state
       const loginResult = await startClaudeLogin();
@@ -769,7 +769,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should validate state matches PKCE state (security test)', async () => {
       // Import service
-      const { startClaudeLogin, sendLoginCode } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin, sendLoginCode } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Start OAuth login first to initialize PKCE state
       const loginResult = await startClaudeLogin();
@@ -806,7 +806,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
   describe('getLoginState', () => {
     it('should return idle state when no login active', async () => {
       // Import service
-      const { getLoginState, cancelLogin } = await import('../../src/services/auth-anthropic.js');
+      const { getLoginState, cancelLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Ensure no login is active by canceling any existing login
       cancelLogin();
@@ -844,7 +844,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should return waiting state when login in progress', async () => {
       // Import service
-      const { startClaudeLogin, getLoginState } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin, getLoginState } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Start a login to create an active PKCE flow
       const loginResult = await startClaudeLogin();
@@ -890,7 +890,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should clean up stale logins (>5min old)', async () => {
       // Import service and file system functions
-      const { startClaudeLogin, getLoginState } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin, getLoginState } = await import('../../apps/runtime/src/services/auth-anthropic.js');
       const { writeFileSync } = await import('fs');
 
       // Setup fake timers to control time
@@ -956,7 +956,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
   describe('cancelLogin', () => {
     it('should clear login state when login is active', async () => {
       // Import service
-      const { startClaudeLogin, getLoginState, cancelLogin } = await import('../../src/services/auth-anthropic.js');
+      const { startClaudeLogin, getLoginState, cancelLogin } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Start a login to create an active PKCE flow
       const loginResult = await startClaudeLogin();
@@ -1012,7 +1012,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should be idempotent (safe to call when no login active)', async () => {
       // Import service
-      const { cancelLogin, getLoginState } = await import('../../src/services/auth-anthropic.js');
+      const { cancelLogin, getLoginState } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Ensure no login is active
       cancelLogin(); // First call to ensure clean state
@@ -1052,7 +1052,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
   describe('isClaudeAuthenticated', () => {
     it('should prioritize CLAUDE_CODE_OAUTH_TOKEN env var (priority 1)', async () => {
       // Import service and invalidateAuthCache to clear any cached state
-      const { isClaudeAuthenticated, invalidateAuthCache } = await import('../../src/services/auth-anthropic.js');
+      const { isClaudeAuthenticated, invalidateAuthCache } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Set environment variable with valid token format
       const mockEnvToken = 'sk-ant-oat01-mock-env-token-1234567890';
@@ -1093,7 +1093,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should fall back to .credentials.json when env var not set (priority 2)', async () => {
       // Import services
-      const { sendLoginCode, isClaudeAuthenticated, invalidateAuthCache, _resetInMemoryTokenForTesting } = await import('../../src/services/auth-anthropic.js');
+      const { sendLoginCode, isClaudeAuthenticated, invalidateAuthCache, _resetInMemoryTokenForTesting } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Ensure env var is NOT set
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -1139,7 +1139,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should fall back to legacy plaintext .credentials.json (priority 3)', async () => {
       // Import services
-      const { isClaudeAuthenticated, invalidateAuthCache } = await import('../../src/services/auth-anthropic.js');
+      const { isClaudeAuthenticated, invalidateAuthCache } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Ensure env var is NOT set
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -1200,7 +1200,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should cache authentication status for 3 seconds (AUTH_CACHE_TTL)', async () => {
       // Import services and vitest fake timers
-      const { sendLoginCode, isClaudeAuthenticated, invalidateAuthCache, _resetInMemoryTokenForTesting } = await import('../../src/services/auth-anthropic.js');
+      const { sendLoginCode, isClaudeAuthenticated, invalidateAuthCache, _resetInMemoryTokenForTesting } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Create encrypted credentials file
       const mockToken = 'sk-ant-oat01-test-cache-ttl-token-1234567890';
@@ -1273,7 +1273,7 @@ describe('auth-anthropic.ts - OAuth Flow', () => {
 
     it('should invalidate cache immediately when invalidateAuthCache() is called', async () => {
       // Import services
-      const { sendLoginCode, isClaudeAuthenticated, invalidateAuthCache, _resetInMemoryTokenForTesting } = await import('../../src/services/auth-anthropic.js');
+      const { sendLoginCode, isClaudeAuthenticated, invalidateAuthCache, _resetInMemoryTokenForTesting } = await import('../../apps/runtime/src/services/auth-anthropic.js');
 
       // Arrange - Create encrypted credentials file
       const mockToken = 'sk-ant-oat01-test-cache-invalidation-token-xyz';

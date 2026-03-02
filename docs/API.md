@@ -1,11 +1,30 @@
 # API Reference — Codeck Sandbox
 
-All endpoints are served at `http://localhost/api/` (port 80).
+All endpoints are served at `/api/` (relative to the host). In local mode, the runtime handles everything on port 80. In gateway mode, the daemon on port 8080 handles auth routes and proxies everything else to the runtime.
+
 All protected endpoints require `Authorization: Bearer <token>` header (or `?token=<token>` for download links).
 
 ---
 
-## Authentication (Public)
+## Daemon Routes (Gateway Mode Only)
+
+These routes are handled directly by the daemon in gateway mode. They do not exist in local mode (runtime handles auth instead).
+
+| Method | Endpoint | Auth? | Body | Response | Description |
+|--------|----------|-------|------|----------|-------------|
+| `GET` | `/api/ui/status` | No | — | `{ status, mode, uptime, wsConnections }` | Daemon health check |
+| `GET` | `/api/auth/status` | No | — | `{ configured: boolean }` | Check if password is set up |
+| `POST` | `/api/auth/login` | No | `{ password, deviceId? }` | `{ success, token }` or `{ error }` | Create daemon session. Rate limited (10/min). Lockout after 5 failures (15 min). |
+| `POST` | `/api/auth/logout` | Yes | — | `{ success }` | Invalidate daemon session token |
+| `GET` | `/api/auth/sessions` | Yes | — | `SessionInfo[]` | List active daemon sessions (sorted by lastSeen DESC) |
+| `DELETE` | `/api/auth/sessions/:id` | Yes | — | `{ success }` or 404 | Revoke a specific session |
+| `GET` | `/api/auth/log` | Yes | — | `AuthLogEntry[]` | Auth event history (last 200 entries) |
+
+All other `/api/*` requests are proxied to the runtime with `X-Forwarded-For/Proto/Host` headers. The daemon strips its own `Authorization` header before proxying.
+
+---
+
+## Runtime Authentication (Public)
 
 | Method | Endpoint | Body | Response | Description |
 |--------|----------|------|----------|-------------|
@@ -13,7 +32,7 @@ All protected endpoints require `Authorization: Bearer <token>` header (or `?tok
 | `POST` | `/api/auth/setup` | `{ password }` | `{ success, token }` | Set initial password (min 8, max 256 chars, one-time) |
 | `POST` | `/api/auth/login` | `{ password }` | `{ success, token }` or `{ error }` | Login with password. Locked out for 15 min after 5 failures. |
 
-## Authentication (Protected)
+## Runtime Authentication (Protected)
 
 | Method | Endpoint | Body | Response | Description |
 |--------|----------|------|----------|-------------|
@@ -108,6 +127,8 @@ All protected endpoints require `Authorization: Bearer <token>` header (or `?tok
 | `GET` | `/api/files/read` | `?path=<relative>` | `{ success, content, size }` | Read file content (max 100KB) |
 | `PUT` | `/api/files/write` | `{ path, content }` | `{ success }` | Write file content (max 500KB, creates parent dirs) |
 | `POST` | `/api/files/mkdir` | `{ name }` | `{ success, name, path }` | Create directory in workspace root |
+| `DELETE` | `/api/files/delete` | `{ path }` | `{ success }` | Delete file or empty directory |
+| `POST` | `/api/files/rename` | `{ oldPath, newPath }` | `{ success }` | Rename/move file or directory |
 
 **`items[]` format:** `{ name, isDirectory, size, modified }`
 
@@ -360,9 +381,23 @@ Full CRUD memory system with durable memory, daily journals, ADRs, path-scoped m
 
 ---
 
+## Internal Endpoints (Runtime Only)
+
+These endpoints are not exposed through the daemon proxy. They are used for inter-service communication.
+
+| Method | Endpoint | Response | Description |
+|--------|----------|----------|-------------|
+| `GET` | `/internal/status` | `{ status: "ok", uptime: <seconds> }` | Runtime health check. Used by daemon's `checkRuntime()`. Registered before auth middleware. |
+
+In gateway mode, the runtime also accepts WebSocket connections on a dedicated port (`CODECK_WS_PORT`, default 7778) at `/internal/pty/:id` for per-session PTY streams.
+
+---
+
 ## WebSocket
 
 **Connection:** `ws[s]://host?token=<auth_token>`
+
+In gateway mode, the daemon validates the token on upgrade, then proxies the raw TCP connection to the runtime's WS port. The protocol is identical from the client's perspective.
 
 ### Client → Server Messages
 

@@ -16,7 +16,7 @@ import {
   isPasswordConfigured,
   validateSession,
   _resetForTesting
-} from '../../src/services/auth.js';
+} from '../../apps/runtime/src/services/auth.js';
 
 // Use default CODECK_DIR (/workspace/.codeck) for testing
 const CODECK_DIR = process.env.CODECK_DIR || '/workspace/.codeck';

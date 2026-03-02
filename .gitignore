@@ -9,6 +9,7 @@ node_modules
 dist
 *.tsbuildinfo
 
+
 # Local env files (NEVER commit these!)
 .env
 .env.local
@@ -71,9 +72,9 @@ pnpm-debug.log*
 scripts/node_modules/
 scripts/package-lock.json
 
-# CLI build artifacts
-cli/dist/
-cli/node_modules/
-
 # Docker (local overrides)
 docker-compose.override.yml
+docker/compose.override.yml
+
+# Shared data directory (managed mode — daemon ↔ runtime)
+.codeck-data/

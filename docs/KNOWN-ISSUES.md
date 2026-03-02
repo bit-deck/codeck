@@ -1,6 +1,6 @@
 # Known Issues & Technical Debt — Codeck
 
-Last updated: 2026-02-15.
+Last updated: 2026-02-19.
 
 ---
 
@@ -22,7 +22,7 @@ Both have `POST /clone` with different behavior. `project.routes.ts` lacks timeo
 
 ### 3. `git.ts` is a god-module
 
-**File:** `src/services/git.ts` (500+ lines)
+**File:** `apps/runtime/src/services/git.ts` (500+ lines)
 
 Handles git, GitHub CLI auth, SSH keys, workspace CLAUDE.md, credentials, and repo listing. Split into `git.ts`, `ssh.ts`, `github.ts`, `workspace.ts`.
 
@@ -32,7 +32,7 @@ Handles git, GitHub CLI auth, SSH keys, workspace CLAUDE.md, credentials, and re
 
 ### 5. Unused `pnpm` in base image
 
-`Dockerfile.base` installs `pnpm` globally but project uses `npm`. Unnecessary image weight.
+`docker/Dockerfile.base` installs `pnpm` globally but project uses `npm`. Unnecessary image weight.
 
 ### 6. Synchronous filesystem operations in routes
 
@@ -82,7 +82,15 @@ PTY sessions keep running when WS client disconnects. No auto-cleanup timeout fo
 
 `appendFileSync()` blocks during disk I/O. Negligible on fast disks, problematic on NFS/SMB.
 
-### 14. No backup/restore verification
+### 14. Runtime port-manager is legacy code
+
+**File:** `apps/runtime/src/services/port-manager.ts`
+
+In **managed mode**, port exposure is handled by the daemon — the runtime's port-manager is bypassed. In **isolated mode**, the port-manager requires the Docker socket to be mounted (commented out by default in `compose.isolated.yml` for security). Without the socket, the port-manager silently does nothing.
+
+**Plan:** Replace with a daemon endpoint (`POST /api/system/add-port`) that the runtime can call over the internal network. The daemon then updates `compose.override.yml` and restarts the runtime container — all from outside the container boundary. Until that endpoint is implemented, port exposure in isolated mode requires manual Docker socket mounting.
+
+### 15. No backup/restore verification
 
 Workspace export (`GET /api/workspace/export`) creates `.tar.gz` but has no checksum, no restore testing, no schema migration.
 
@@ -102,7 +110,7 @@ Backpressure via `pty.pause()`/`resume()` is implemented but has no send queue m
 
 `@xenova/transformers` requires `sharp` (native module) which fails to install in the current Docker image. Hybrid search degrades gracefully to BM25-only. sqlite-vec extension loads fine — only the embedding provider is missing.
 
-**Fix:** Either precompile `sharp` + `@xenova/transformers` in `Dockerfile.base`, or use the Gemini fallback (`GEMINI_API_KEY` env var). The WASM model is ~300MB on first download.
+**Fix:** Either precompile `sharp` + `@xenova/transformers` in `docker/Dockerfile.base`, or use the Gemini fallback (`GEMINI_API_KEY` env var). The WASM model is ~300MB on first download.
 
 ### MemorySection component is dead code
 
@@ -144,9 +152,9 @@ Session tokens in localStorage are accessible to XSS. Acceptable for single-user
 
 Token in `ws://...?token=` URL visible in DevTools. Migrate to WebSocket subprotocol header.
 
-### Host mode disables network isolation
+### mDNS has no authentication
 
-LAN mode (`docker-compose.lan.yml`) shares host network. Only use on trusted networks.
+LAN access via `codeck.local` uses mDNS (RFC 6762), which has no authentication. On untrusted LANs, attackers can spoof `codeck.local` to redirect browsers. Always verify the URL before entering credentials.
 
 ### Workspace export follows symlinks
 
@@ -213,3 +221,23 @@ These were identified during a 124-item automated security audit. Implemented 86
 | Runtime testing | 1 | Remove `DAC_OVERRIDE` capability (requires Docker validation) |
 
 None are security-critical. Most are operational polish or would require significant architecture changes.
+
+---
+
+## Gateway Mode (daemon/runtime split)
+
+### Daemon/runtime session mismatch
+
+In gateway mode, the daemon and runtime maintain separate session stores. A user logs in once to the daemon — the runtime trusts the private network. If the runtime's `auth.json` password is changed, the daemon's validation still uses the old cached read. **Workaround:** Restart the daemon after password changes.
+
+### WS proxy reconnection on partial restart
+
+If the runtime restarts while the daemon is running, all proxied WS connections drop. The daemon returns 502 on new WS upgrades until the runtime is back. Clients auto-reconnect, but there's a visible disconnect period. If the daemon restarts, clients must re-authenticate (daemon sessions are lost unless persisted).
+
+### HTTP proxy body re-serialization
+
+The daemon's HTTP proxy re-serializes `req.body` after `express.json()` consumes the stream. This works for all current JSON-only API endpoints. If file upload endpoints are added to the runtime, the proxy will need raw body passthrough.
+
+### Audit log rotation
+
+The daemon's `audit.log` is append-only JSONL with no rotation. On busy systems this file grows indefinitely. **Workaround:** External logrotate or periodic manual truncation.

@@ -21,12 +21,12 @@ export default defineConfig({
       },
 
       // Include source files
-      include: ['src/**/*.ts'],
+      include: ['apps/runtime/src/**/*.ts'],
 
       // Exclude files
       exclude: [
-        'src/web/src/**', // Frontend (separate testing strategy)
-        'src/web/vite.config.ts',
+        'apps/runtime/src/web/src/**', // Frontend (separate testing strategy)
+        'apps/runtime/src/web/vite.config.ts',
         'dist/**',
         'node_modules/**',
         'tests/**',
@@ -67,10 +67,10 @@ export default defineConfig({
 
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
-      '@services': path.resolve(__dirname, './src/services'),
-      '@routes': path.resolve(__dirname, './src/routes'),
-      '@web': path.resolve(__dirname, './src/web'),
+      '@': path.resolve(__dirname, './apps/runtime/src'),
+      '@services': path.resolve(__dirname, './apps/runtime/src/services'),
+      '@routes': path.resolve(__dirname, './apps/runtime/src/routes'),
+      '@web': path.resolve(__dirname, './apps/runtime/src/web'),
     },
   },
 });
